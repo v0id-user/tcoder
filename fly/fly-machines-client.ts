@@ -51,6 +51,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 			region: config.region,
 			config: {
 				image: `registry.fly.io/${config.appName}:latest`,
+				// Trick: we are passing the job parameters as environment variables to the machine
 				env: {
 					JOB_ID: job.jobId,
 					INPUT_URL: job.inputUrl,

@@ -1,6 +1,37 @@
 # Fly.io Ephemeral FFmpeg Workers
 
-Lambda-style batch processing on Fly.io Machines powered by Bun.
+FFmpeg transcoding jobs that run on Fly.io Machines. Each job gets its own machine, runs once, then shuts down.
+
+## What "Ephemeral" Means
+
+Ephemeral means temporary. These machines don't stay running.
+
+**Normal server**: You start it, it runs 24/7, you pay for all that time even when it's idle.
+
+**Ephemeral worker**: You create a machine when you need it, it does one job, then it stops. You only pay for the time it's actually working.
+
+Think of it like this:
+- Normal server = leaving a car running all day, paying for gas the whole time
+- Ephemeral worker = starting the car, driving somewhere, turning it off when you arrive
+
+## How It Works
+
+1. You need to transcode a video
+2. Your code calls the Fly Machines API to create a new machine
+3. The machine starts up and runs FFmpeg
+4. When FFmpeg finishes, the process exits
+5. The machine automatically stops
+6. You stop paying
+
+No machines running = no cost. Only pay when work is happening.
+
+## Why This Design
+
+**Cost**: If you only process 10 videos per day, why pay for a server running 24/7? You only need compute for those 10 jobs.
+
+**Simplicity**: Each job is isolated. If one job crashes, it doesn't affect others. No shared state, no cleanup needed.
+
+**Scaling**: Need to process 100 videos? Create 100 machines. They all run in parallel, then shut down when done.
 
 ## Architecture
 
