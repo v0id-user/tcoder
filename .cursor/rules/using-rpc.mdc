@@ -1,0 +1,284 @@
+---
+alwaysApply: true
+title: Hono RPC Client Usage Rules
+description: Enforced rules for using Hono RPC on the client for maximum type-safety, modern DX, and zero drift.
+---
+
+
+## Core Principle
+
+**Hono RPC is the default client interface.**
+If an API is written in Hono, the client **must** consume it via `hc<AppType>`.
+
+Manual `fetch`, hand-written API clients, and duplicated request/response types are considered architectural debt.
+
+---
+
+## 1. No Manual Fetch for Internal APIs
+
+### ❌ Forbidden
+```ts
+fetch("/api/posts", {
+  method: "POST",
+  body: JSON.stringify(data),
+})
+````
+
+### ✅ Required
+
+```ts
+const res = await client.posts.$post({
+  form: {
+    title,
+    body,
+  },
+})
+```
+
+If the server is Hono, the client **must** be RPC-driven.
+
+---
+
+## 2. AppType Is the Single Source of Truth
+
+The server **must** export a type that represents the API surface.
+
+```ts
+export type AppType = typeof routes
+```
+
+The client **must** consume that exact type.
+
+```ts
+const client = hc<AppType>("/api")
+```
+
+No re-declared request shapes.
+No copied response interfaces.
+No guessing.
+
+---
+
+## 3. Validators Are Mandatory on the Server
+
+Every RPC-exposed route **must** use a validator:
+
+* `zValidator`
+* or equivalent typed validator
+
+```ts
+zValidator(
+  "form",
+  z.object({
+    title: z.string(),
+    body: z.string(),
+  })
+)
+```
+
+If there is no validator, RPC type inference is considered incomplete.
+
+---
+
+## 4. Status Codes Must Be Explicit
+
+### ❌ Forbidden
+
+```ts
+return c.notFound()
+```
+
+### ✅ Required
+
+```ts
+return c.json({ error: "not found" }, 404)
+```
+
+All non-200 responses **must**:
+
+* use `c.json`
+* specify a status code
+* return a typed payload
+
+This is required for correct client-side inference.
+
+---
+
+## 5. Client Code Must Branch on Status, Not Shape
+
+### ❌ Forbidden
+
+```ts
+const data = await res.json()
+if ("error" in data) { ... }
+```
+
+### ✅ Required
+
+```ts
+if (res.status === 404) {
+  const data = await res.json()
+}
+
+if (res.ok) {
+  const data = await res.json()
+}
+```
+
+Status codes are part of the type system. Use them.
+
+---
+
+## 6. Prefer Infer Types Over Manual Annotations
+
+Client-side request and response types must be derived:
+
+```ts
+type Req = InferRequestType<typeof client.posts.$post>
+type Res = InferResponseType<typeof client.posts.$post>
+```
+
+Manual request/response typing is forbidden unless absolutely necessary.
+
+---
+
+## 7. Path Params and Query Must Stay Strings
+
+All `param` and `query` values passed from the client **must** be strings.
+
+Type coercion belongs in validators, not client code.
+
+```ts
+query: {
+  page: "1"
+}
+```
+
+If you pass numbers directly, you are violating the contract.
+
+---
+
+## 8. Prefer $url() for Derived URLs
+
+If a URL is needed for:
+
+* SWR keys
+* caching
+* logging
+* linking
+
+Use `$url()` instead of string concatenation.
+
+```ts
+const url = client.posts[":id"].$url({
+  param: { id },
+})
+```
+
+This guarantees route correctness and refactor safety.
+
+---
+
+## 9. Shared Configuration Lives in hc()
+
+Headers, credentials, custom fetch, and serializers **must** be defined once:
+
+```ts
+const client = hc<AppType>("/api", {
+  init: {
+    credentials: "include",
+  },
+  headers: {
+    Authorization: "Bearer TOKEN",
+  },
+})
+```
+
+Per-call overrides are allowed, but global defaults come first.
+
+---
+
+## 10. Large Apps Must Be Split by Domain
+
+For non-trivial applications:
+
+* Split routes by domain
+* Export multiple AppTypes if needed
+* Create multiple clients if it improves IDE performance
+
+```ts
+const authorsClient = hc<typeof authorsApp>("/authors")
+const booksClient = hc<typeof booksApp>("/books")
+```
+
+One mega-client for everything is discouraged.
+
+---
+
+## 11. IDE Performance Is a First-Class Concern
+
+If RPC types slow down the IDE:
+
+You **must** apply one of:
+
+* pre-compiling client types
+* `hcWithType` pattern
+* domain-split clients
+
+Ignoring this and “just dealing with it” is not acceptable.
+
+---
+
+## 12. Version Parity Is Mandatory
+
+Client and server **must** use the same Hono version.
+
+If frontend and backend diverge:
+
+* type instantiation errors are expected
+* fixes are not optional
+
+Lock versions. Coordinate upgrades.
+
+---
+
+## 13. RPC + Effect Is the Preferred Stack
+
+Hono RPC handles:
+
+* request typing
+* routing
+* transport
+
+Effect handles:
+
+* execution
+* errors
+* retries
+* cancellation
+* observability
+
+Client code should:
+
+* call RPC
+* lift results into Effect
+* never reintroduce untyped async flows
+
+---
+
+## Final Rule
+
+If you feel tempted to:
+
+> “Just fetch it, it’s faster”
+
+You are paying with:
+
+* duplicated types
+* silent drift
+* runtime bugs
+* refactor fear
+
+Hono RPC exists to eliminate that entire class of problems.
+Use it aggressively.
+

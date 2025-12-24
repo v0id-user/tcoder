@@ -1,0 +1,236 @@
+---
+alwaysApply: true
+title: EffectTS Usage Rules
+description: Non-negotiable rules for using Effect as the core runtime, standard library, and error model.
+---
+
+## Core Principle
+
+**Effect is the default execution model.**
+Promises, async/await, and try/catch are considered legacy escape hatches and must not be introduced in new code unless explicitly justified.
+
+If it can be modeled as `Effect`, it **must** be modeled as `Effect`.
+
+---
+
+## 1. No Naked Promises
+
+### ❌ Forbidden
+```ts
+async function fetchUser(id: string) {
+  const res = await fetch(`/users/${id}`)
+  return res.json()
+}
+````
+
+### ✅ Required
+
+```ts
+import { Effect } from "effect"
+
+const fetchUser = (id: string) =>
+  Effect.tryPromise(() => fetch(`/users/${id}`)).pipe(
+    Effect.andThen((res) => Effect.tryPromise(() => res.json()))
+  )
+```
+
+All async work must be represented as `Effect.Effect<R, E, A>`.
+
+---
+
+## 2. Errors Are Values, Not Side Effects
+
+### ❌ Forbidden
+
+* `throw`
+* `try / catch`
+* returning `{ ok: boolean }` unions
+
+### ✅ Required
+
+* Typed error channels
+* Domain-specific error ADTs
+
+```ts
+type FetchError =
+  | { _tag: "RequestFailed" }
+  | { _tag: "InvalidJson" }
+
+const getTodo = (id: number) =>
+  httpClient.get(`/todos/${id}`).pipe(
+    Effect.andThen((res) => res.json),
+    Effect.mapError((): FetchError => ({ _tag: "RequestFailed" }))
+  )
+```
+
+If it can fail, it **must** be in the error channel.
+
+---
+
+## 3. Side Effects Must Be Explicit
+
+### ❌ Forbidden
+
+```ts
+console.log("hello")
+Date.now()
+Math.random()
+```
+
+### ✅ Required
+
+```ts
+import { Console, Effect, Random, Clock } from "effect"
+
+const program = Effect.gen(function* () {
+  yield* Console.log("hello")
+  const now = yield* Clock.currentTimeMillis
+  const n = yield* Random.next
+})
+```
+
+If it touches the outside world, it lives in `Effect`.
+
+---
+
+## 4. Dependency Injection via Context Only
+
+### ❌ Forbidden
+
+* Global singletons
+* Importing concrete implementations directly
+* Manual constructor injection
+
+### ✅ Required
+
+```ts
+class UserRepo extends Effect.Tag("UserRepo")<
+  UserRepo,
+  { getUser: (id: string) => Effect.Effect<never, UserNotFound, User> }
+>() {}
+```
+
+All dependencies must be provided via `Layer`.
+
+---
+
+## 5. Runtime Boundaries Are Explicit
+
+### Allowed Runtime Entrypoints Only
+
+* `Effect.runSync`
+* `Effect.runPromise`
+* `Effect.runFork`
+
+They may only appear:
+
+* In `main.ts`
+* In framework adapters (Next.js, Workers, CLI)
+
+Nowhere else. Ever.
+
+---
+
+## 6. Concurrency Is Declarative
+
+### ❌ Forbidden
+
+* `Promise.all`
+* `Promise.race`
+* manual cancellation logic
+
+### ✅ Required
+
+```ts
+Effect.all(tasks, { concurrency: 5 })
+Effect.race(a, b)
+Effect.timeout("1 second")
+```
+
+Concurrency is **data**, not control flow.
+
+---
+
+## 7. Retries, Timeouts, and Interruption Are Mandatory
+
+If an effect:
+
+* touches the network
+* talks to storage
+* calls another service
+
+It **must** define:
+
+* retry policy
+* timeout
+* interruption behavior
+
+```ts
+Effect.retry(Schedule.exponential("100 millis").pipe(
+  Schedule.recurs(3)
+))
+.pipe(Effect.timeout("1 second"))
+```
+
+No defaults. Be explicit.
+
+---
+
+## 8. Logging, Tracing, Metrics via Effect Only
+
+### ❌ Forbidden
+
+* `console.log` outside `Console`
+* ad-hoc logging libraries
+
+### ✅ Required
+
+* `Effect.log`
+* Effect-integrated OpenTelemetry
+
+Observability is not optional. If it runs in prod, it must be observable.
+
+---
+
+## 9. Prefer Effect Data Structures
+
+Use Effect-provided structures instead of ad-hoc libraries:
+
+* `Option` instead of `null | undefined`
+* `Either` instead of union error objects
+* `Chunk` instead of mutable arrays
+* `Queue`, `PubSub` for async coordination
+
+If a standard Effect abstraction exists, **use it**.
+
+---
+
+## 10. Incremental Adoption Rules
+
+Legacy code is allowed to exist.
+
+New code:
+
+* must be Effect-first
+* must not introduce new Promise-based APIs
+* must wrap legacy logic at the boundary
+
+Effect spreads inward, never outward.
+
+---
+
+## Final Rule
+
+If you feel tempted to say:
+
+> "This is simpler without Effect"
+
+You are almost certainly pushing complexity into:
+
+* runtime failures
+* untyped errors
+* unobservable behavior
+* future refactors
+
+Pay the cost upfront.
+Effect is the system. Not a helper.
