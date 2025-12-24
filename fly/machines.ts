@@ -34,7 +34,7 @@ interface TranscodeJob {
 	readonly inputUrl: string;
 	readonly outputUrl: string;
 	readonly preset?: string;
-	readonly apiToken?: string;
+	readonly apiToken: string;
 }
 
 type FlyApiError =
@@ -46,7 +46,7 @@ type FlyApiError =
 const createTranscodeMachine = (job: TranscodeJob) =>
 	Effect.gen(function* () {
 		const config = yield* FlyConfigService;
-		const apiToken = job.apiToken ?? config.apiToken;
+		const apiToken = job.apiToken;
 
 		const request: CreateMachineRequest = {
 			name: `ffmpeg-${job.jobId}`,
@@ -124,11 +124,10 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 // Get machine status
 const getMachineStatus = (
 	machineId: string,
-	apiToken?: string
+	apiToken: string
 ) =>
 	Effect.gen(function* () {
 		const config = yield* FlyConfigService;
-		const token = apiToken ?? config.apiToken;
 
 		const machine = yield* Effect.tryPromise({
 			try: () =>
@@ -140,7 +139,7 @@ const getMachineStatus = (
 					undefined,
 					{
 						headers: {
-							Authorization: `Bearer ${token}`,
+							Authorization: `Bearer ${apiToken}`,
 						},
 					}
 				),
@@ -185,7 +184,7 @@ const getMachineStatus = (
 // Wait for machine to complete
 const waitForCompletion = (
 	machineId: string,
-	apiToken?: string
+	apiToken: string
 ) =>
 	Effect.gen(function* () {
 		let attempts = 0;
@@ -213,14 +212,13 @@ const waitForCompletion = (
 // Complete job execution flow
 export const executeTranscodeJob = (job: TranscodeJob) =>
 	Effect.gen(function* () {
-		const apiToken = job.apiToken;
 
 		// Create and start machine
 		const machine = yield* createTranscodeMachine(job);
 		yield* Effect.log(`Machine created: ${machine.id}`);
 
 		// Wait for completion
-		const completed = yield* waitForCompletion(machine.id, apiToken);
+		const completed = yield* waitForCompletion(machine.id, job.apiToken);
 		yield* Effect.log(`Machine ${completed.state}: ${completed.id}`);
 
 		return completed;
