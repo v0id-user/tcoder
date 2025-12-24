@@ -122,7 +122,7 @@ const job = {
   outputUrl: "https://r2.example.com/outputs/video.mp4",
   preset: "web-optimized",
   apiToken: process.env.FLY_API_TOKEN!,
-  // Optional: Webhook for completion notifications
+  // Required: Webhook for completion notifications (Phase 4 - Discoverability Phase)
   webhookUrl: "https://api.example.com/webhooks/transcode-complete",
   // Optional: Multiple quality outputs
   outputQualities: ["480p", "720p", "1080p"],
@@ -183,8 +183,8 @@ Each job receives:
 | `JOB_ID` | Unique job identifier | Yes | `550e8400-e29b-41d4-a716-446655440000` |
 | `INPUT_URL` | Source media URL (R2 presigned URL or direct URL) | Yes | `https://r2.example.com/video.mp4?signature=...` |
 | `OUTPUT_URL` | Base destination URL in R2 | Yes | `https://r2.example.com/outputs/video.mp4` |
+| `WEBHOOK_URL` | Worker API endpoint for completion notifications (Phase 4 - Discoverability Phase) | Yes | `https://api.example.com/webhooks/transcode-complete` |
 | `PRESET` | FFmpeg preset | No | `web-optimized`, `hls`, `hls-adaptive`, `default` |
-| `WEBHOOK_URL` | Worker API endpoint for completion notifications | No | `https://api.example.com/webhooks/transcode-complete` |
 | `OUTPUT_QUALITIES` | Comma-separated quality list for multi-output | No | `480p,720p,1080p` |
 | `R2_ACCOUNT_ID` | Cloudflare R2 account ID (for direct bucket access) | No* | `abc123def456` |
 | `R2_ACCESS_KEY_ID` | R2 access key ID | No* | `your-access-key` |
@@ -260,6 +260,7 @@ If jobs aren't starting:
      --env JOB_ID=test-123 \
      --env INPUT_URL=https://example.com/input.mp4 \
      --env OUTPUT_URL=/tmp/output.mp4 \
+     --env WEBHOOK_URL=https://api.example.com/webhooks/transcode-complete \
      --env PRESET=default \
      registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:latest
    ```
@@ -305,7 +306,7 @@ app.post("/transcode", async (c) => {
     outputUrl, // Base R2 output URL
     preset: "web-optimized",
     apiToken: process.env.FLY_API_TOKEN!,
-    webhookUrl: `${c.env.WORKER_URL}/webhooks/transcode-complete`, // Your webhook endpoint
+    webhookUrl: `${c.env.WORKER_URL}/webhooks/transcode-complete`, // Required: Your webhook endpoint (Phase 4 - Discoverability Phase)
     outputQualities: ["480p", "720p", "1080p"], // Optional: multiple qualities
   };
 
@@ -390,9 +391,9 @@ The worker consists of several Effect-based services:
 - **TODO**: Replace mock implementations with actual R2 SDK (`@aws-sdk/client-s3`)
 
 ### Webhook Client (`webhook-client.ts`)
-- Sends completion notifications to Worker API
+- Sends completion notifications to Worker API (required)
 - Includes job results, output URLs, and error information
-- Implements Phase 4 (Discoverability Phase) from architecture
+- Implements Phase 4 (Discoverability Phase) from architecture - enables client awareness of new URLs
 - **TODO**: Add retry logic with exponential backoff and timeout handling
 
 ### Worker (`worker.ts`)

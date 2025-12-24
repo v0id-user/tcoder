@@ -34,7 +34,7 @@ interface JobConfig {
 	readonly inputUrl: string; // R2 presigned URL or direct URL
 	readonly outputUrl: string; // Base output URL (may generate multiple qualities)
 	readonly preset: string;
-	readonly webhookUrl?: string; // Optional webhook URL for completion notification
+	readonly webhookUrl: string; // Required webhook URL for completion notification (Phase 4 - Discoverability Phase)
 	readonly outputQualities?: string[]; // Optional: ["480p", "720p", "1080p"]
 }
 
@@ -57,9 +57,9 @@ const getJobConfig = Effect.sync((): JobConfig => {
 		? process.env.OUTPUT_QUALITIES.split(",").map((q) => q.trim())
 		: undefined;
 
-	if (!jobId || !inputUrl || !outputUrl) {
+	if (!jobId || !inputUrl || !outputUrl || !webhookUrl) {
 		throw new Error(
-			"Missing required env vars: JOB_ID, INPUT_URL, OUTPUT_URL"
+			"Missing required env vars: JOB_ID, INPUT_URL, OUTPUT_URL, WEBHOOK_URL"
 		);
 	}
 
@@ -321,7 +321,7 @@ const getFileExtension = (path: string): string => {
 	return match ? `.${match[1]}` : "";
 };
 
-// Send webhook notification
+// Send webhook notification (Phase 4 - Discoverability Phase)
 const notifyWebhook = (
 	config: JobConfig,
 	outputs: OutputFile[],
@@ -329,13 +329,6 @@ const notifyWebhook = (
 	error?: string
 ) =>
 	Effect.gen(function* () {
-		if (!config.webhookUrl) {
-			yield* Console.log(
-				"[Webhook] No webhook URL configured, skipping notification"
-			);
-			return;
-		}
-
 		const webhookClient = yield* WebhookClientService;
 
 		const payload: WebhookPayload = {
@@ -379,9 +372,7 @@ const program = Effect.gen(function* () {
 	yield* Console.log(`Input: ${config.inputUrl}`);
 	yield* Console.log(`Output: ${config.outputUrl}`);
 	yield* Console.log(`Preset: ${config.preset}`);
-	if (config.webhookUrl) {
-		yield* Console.log(`Webhook: ${config.webhookUrl}`);
-	}
+	yield* Console.log(`Webhook: ${config.webhookUrl}`);
 	if (config.outputQualities) {
 		yield* Console.log(`Qualities: ${config.outputQualities.join(", ")}`);
 	}

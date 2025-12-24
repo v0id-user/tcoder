@@ -35,8 +35,8 @@ interface TranscodeJob {
 	readonly outputUrl: string;
 	readonly preset?: string;
 	readonly apiToken: string;
-	// Optional: Webhook URL for completion notification (Phase 4)
-	readonly webhookUrl?: string;
+	// Required: Webhook URL for completion notification (Phase 4 - Discoverability Phase)
+	readonly webhookUrl: string;
 	// Optional: Multiple output qualities (e.g., ["480p", "720p", "1080p"])
 	readonly outputQualities?: string[];
 	// Optional: R2 configuration (if not using presigned URLs)
@@ -68,10 +68,8 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 			PRESET: job.preset || "default",
 		};
 
-		// Add webhook URL if provided
-		if (job.webhookUrl) {
-			env.WEBHOOK_URL = job.webhookUrl;
-		}
+		// Add webhook URL (required for Phase 4 - Discoverability Phase)
+		env.WEBHOOK_URL = job.webhookUrl;
 
 		// Add output qualities if provided
 		if (job.outputQualities && job.outputQualities.length > 0) {

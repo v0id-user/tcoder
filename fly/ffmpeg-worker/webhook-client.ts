@@ -43,9 +43,13 @@ type WebhookError =
 	| { _tag: "InvalidWebhookUrl"; url: string }
 	| { _tag: "NetworkError"; reason: string };
 
-// Get webhook URL from environment
-const getWebhookUrl = Effect.sync((): string | null => {
-	return process.env.WEBHOOK_URL || null;
+// Get webhook URL from environment (required)
+const getWebhookUrl = Effect.sync((): string => {
+	const url = process.env.WEBHOOK_URL;
+	if (!url) {
+		throw new Error("WEBHOOK_URL is required but not set");
+	}
+	return url;
 });
 
 // Mock webhook notification implementation
@@ -56,13 +60,6 @@ const sendWebhook = (
 	pipe(
 		Effect.gen(function* () {
 		const webhookUrl = yield* getWebhookUrl;
-
-		if (!webhookUrl) {
-			yield* Console.log(
-				"[Webhook] No WEBHOOK_URL configured, skipping notification"
-			);
-			return;
-		}
 
 		yield* Console.log(
 			`[Webhook] Sending notification to ${webhookUrl}`
