@@ -1,6 +1,15 @@
 {
   "name": "fly",
   "private": true,
+  "scripts": {
+    "build:docker": "docker build -t fly-tcoder-ffmpeg-worker-31657fa .",
+    "deploy": "fly deploy",
+    "deploy:image": "fly deploy --image registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:latest",
+    "docker:auth": "fly auth docker",
+    "docker:build": "docker build -t registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:latest .",
+    "docker:push": "docker push registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:latest",
+    "docker:deploy": "bun run docker:build && bun run docker:push && bun run deploy:image"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

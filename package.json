@@ -10,7 +10,12 @@
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"fly:build": "cd fly && bun run build:docker",
+		"fly:deploy": "cd fly && bun run deploy",
+		"fly:docker:build": "cd fly && bun run docker:build",
+		"fly:docker:push": "cd fly && bun run docker:push",
+		"fly:docker:deploy": "cd fly && bun run docker:deploy"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",
