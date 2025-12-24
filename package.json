@@ -15,7 +15,8 @@
 		"fly:deploy": "cd fly && bun run deploy",
 		"fly:docker:build": "cd fly && bun run docker:build",
 		"fly:docker:push": "cd fly && bun run docker:push",
-		"fly:docker:deploy": "cd fly && bun run docker:deploy"
+		"fly:docker:deploy": "cd fly && bun run docker:deploy",
+		"fly:local:test": "cd fly && bun run local:test"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",

@@ -8,7 +8,9 @@
     "docker:auth": "fly auth docker",
     "docker:build": "docker build -t registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:latest .",
     "docker:push": "docker push registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:latest",
-    "docker:deploy": "bun run docker:build && bun run docker:push && bun run deploy:image"
+    "docker:deploy": "bun run docker:build && bun run docker:push && bun run deploy:image",
+    "local:test": "bun run build:docker && docker run --rm -p 8080:8080 fly-tcoder-ffmpeg-worker-31657fa",
+    "docker:run": "docker run --rm -p 8080:8080 fly-tcoder-ffmpeg-worker-31657fa"
   },
   "devDependencies": {
     "@types/bun": "latest"
