@@ -2,6 +2,9 @@
 	"name": "tcoder",
 	"version": "0.0.0",
 	"private": true,
+	"workspaces": [
+		"fly"
+	],
 	"scripts": {
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
