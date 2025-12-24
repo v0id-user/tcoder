@@ -9,7 +9,7 @@
  * 5. Billing only for execution time
  */
 
-import { Effect, Context, Layer } from "effect";
+import { Effect, Context } from "effect";
 import { flyClient } from "./fly-client";
 import type {
 	CreateMachineRequest,
@@ -34,6 +34,7 @@ interface TranscodeJob {
 	readonly inputUrl: string;
 	readonly outputUrl: string;
 	readonly preset?: string;
+	readonly apiToken?: string;
 }
 
 type FlyApiError =
@@ -45,6 +46,7 @@ type FlyApiError =
 const createTranscodeMachine = (job: TranscodeJob) =>
 	Effect.gen(function* () {
 		const config = yield* FlyConfigService;
+		const apiToken = job.apiToken ?? config.apiToken;
 
 		const request: CreateMachineRequest = {
 			name: `ffmpeg-${job.jobId}`,
@@ -77,7 +79,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 					request,
 					{
 						headers: {
-							Authorization: `Bearer ${config.apiToken}`,
+							Authorization: `Bearer ${apiToken}`,
 						},
 					}
 				),
@@ -120,9 +122,13 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 	});
 
 // Get machine status
-const getMachineStatus = (machineId: string) =>
+const getMachineStatus = (
+	machineId: string,
+	apiToken?: string
+) =>
 	Effect.gen(function* () {
 		const config = yield* FlyConfigService;
+		const token = apiToken ?? config.apiToken;
 
 		const machine = yield* Effect.tryPromise({
 			try: () =>
@@ -134,7 +140,7 @@ const getMachineStatus = (machineId: string) =>
 					undefined,
 					{
 						headers: {
-							Authorization: `Bearer ${config.apiToken}`,
+							Authorization: `Bearer ${token}`,
 						},
 					}
 				),
@@ -177,13 +183,16 @@ const getMachineStatus = (machineId: string) =>
 	});
 
 // Wait for machine to complete
-const waitForCompletion = (machineId: string) =>
+const waitForCompletion = (
+	machineId: string,
+	apiToken?: string
+) =>
 	Effect.gen(function* () {
 		let attempts = 0;
 		const maxAttempts = 120;
 
 		while (attempts < maxAttempts) {
-			const status = yield* getMachineStatus(machineId);
+			const status = yield* getMachineStatus(machineId, apiToken);
 
 			if (
 				status.state === "stopped" ||
@@ -204,12 +213,14 @@ const waitForCompletion = (machineId: string) =>
 // Complete job execution flow
 export const executeTranscodeJob = (job: TranscodeJob) =>
 	Effect.gen(function* () {
+		const apiToken = job.apiToken;
+
 		// Create and start machine
 		const machine = yield* createTranscodeMachine(job);
 		yield* Effect.log(`Machine created: ${machine.id}`);
 
 		// Wait for completion
-		const completed = yield* waitForCompletion(machine.id);
+		const completed = yield* waitForCompletion(machine.id, apiToken);
 		yield* Effect.log(`Machine ${completed.state}: ${completed.id}`);
 
 		return completed;
