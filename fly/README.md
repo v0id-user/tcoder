@@ -324,7 +324,7 @@ app.post("/transcode", async (c) => {
 // Webhook endpoint in your Cloudflare Worker
 app.post("/webhooks/transcode-complete", async (c) => {
   const payload = await c.req.json();
-  
+
   // payload structure:
   // {
   //   jobId: string,
@@ -342,7 +342,7 @@ app.post("/webhooks/transcode-complete", async (c) => {
       outputs: payload.outputs,
       duration: payload.duration,
     });
-    
+
     // Notify client via WebSocket or push notification
     await notifyClient(payload.jobId, payload.outputs);
   } else {
