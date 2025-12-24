@@ -59,3 +59,15 @@ The pipeline consists of five phases:
 - **Bunny CDN**: Content delivery network for video distribution
 
 ![Event-Driven Serverless Transcoding Pipeline](./design/architecture/Event-Driven%20Serverless%20Transcoding%20Pipeline.png)
+
+## Fly.io Setup
+
+For detailed information about the Fly.io ephemeral worker setup, configuration, and usage, see [fly/README.md](./fly/README.md).
+
+The Fly.io workers use an ephemeral design where:
+- Each transcoding job gets its own machine
+- Machines start on-demand and stop when the job completes
+- Zero idle cost - you only pay for execution time
+- Perfect for batch processing workloads
+
+See the [Fly.io README](./fly/README.md) for deployment instructions, cost analysis, and integration examples.

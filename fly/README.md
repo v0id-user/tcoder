@@ -2,6 +2,25 @@
 
 FFmpeg transcoding jobs that run on Fly.io Machines. Each job gets its own machine, runs once, then shuts down.
 
+## Table of Contents
+
+- [What "Ephemeral" Means](#what-ephemeral-means)
+- [How It Works](#how-it-works)
+- [Why This Design](#why-this-design)
+- [Architecture](#architecture)
+- [Configuration Philosophy](#configuration-philosophy)
+- [Technology Stack](#technology-stack)
+- [Deployment](#deployment)
+- [Cost Analysis](#cost-analysis)
+- [Environment Variables](#environment-variables)
+- [Presets](#presets)
+- [Monitoring](#monitoring)
+- [Debugging](#debugging)
+- [Important Notes](#important-notes)
+- [Integration with Main App](#integration-with-main-app)
+- [Budget Optimization](#budget-optimization)
+- [Security](#security)
+
 ## What "Ephemeral" Means
 
 Ephemeral means temporary. These machines don't stay running.
@@ -44,19 +63,19 @@ No machines running = no cost. Only pay when work is happening.
 
 ### What We DON'T Use
 
-❌ `[http_service]` - this is not a web server
-❌ `auto_start_machines` / `auto_stop_machines` - not applicable
-❌ `min_machines_running` - we want zero idle machines
-❌ Multiple CPUs - shared CPU is sufficient and cheapest
-❌ Static IPs or ports - no network listening
+- ❌ `[http_service]` - this is not a web server
+- ❌ `auto_start_machines` / `auto_stop_machines` - not applicable
+- ❌ `min_machines_running` - we want zero idle machines
+- ❌ Multiple CPUs - shared CPU is sufficient and cheapest
+- ❌ Static IPs or ports - no network listening
 
 ### What We DO Use
 
-✅ Minimal `fly.toml` (app name, region, dockerfile only)
-✅ `fly deploy --build-only` (build image once)
-✅ Fly Machines API (create machines programmatically)
-✅ Environment variables (pass job parameters)
-✅ Process exit = machine stop (automatic cleanup)
+- ✅ Minimal `fly.toml` (app name, region, dockerfile only)
+- ✅ `fly deploy --build-only` (build image once)
+- ✅ Fly Machines API (create machines programmatically)
+- ✅ Environment variables (pass job parameters)
+- ✅ Process exit = machine stop (automatic cleanup)
 
 ## Technology Stack
 
