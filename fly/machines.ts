@@ -35,6 +35,18 @@ interface TranscodeJob {
 	readonly outputUrl: string;
 	readonly preset?: string;
 	readonly apiToken: string;
+	// Optional: Webhook URL for completion notification (Phase 4)
+	readonly webhookUrl?: string;
+	// Optional: Multiple output qualities (e.g., ["480p", "720p", "1080p"])
+	readonly outputQualities?: string[];
+	// Optional: R2 configuration (if not using presigned URLs)
+	readonly r2Config?: {
+		readonly accountId: string;
+		readonly accessKeyId: string;
+		readonly secretAccessKey: string;
+		readonly bucketName: string;
+		readonly endpoint?: string;
+	};
 }
 
 type FlyApiError =
@@ -48,18 +60,42 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 		const config = yield* FlyConfigService;
 		const apiToken = job.apiToken;
 
+		// Build environment variables for the machine
+		const env: Record<string, string> = {
+			JOB_ID: job.jobId,
+			INPUT_URL: job.inputUrl,
+			OUTPUT_URL: job.outputUrl,
+			PRESET: job.preset || "default",
+		};
+
+		// Add webhook URL if provided
+		if (job.webhookUrl) {
+			env.WEBHOOK_URL = job.webhookUrl;
+		}
+
+		// Add output qualities if provided
+		if (job.outputQualities && job.outputQualities.length > 0) {
+			env.OUTPUT_QUALITIES = job.outputQualities.join(",");
+		}
+
+		// Add R2 configuration if provided
+		if (job.r2Config) {
+			env.R2_ACCOUNT_ID = job.r2Config.accountId;
+			env.R2_ACCESS_KEY_ID = job.r2Config.accessKeyId;
+			env.R2_SECRET_ACCESS_KEY = job.r2Config.secretAccessKey;
+			env.R2_BUCKET_NAME = job.r2Config.bucketName;
+			if (job.r2Config.endpoint) {
+				env.R2_ENDPOINT = job.r2Config.endpoint;
+			}
+		}
+
 		const request: CreateMachineRequest = {
 			name: `ffmpeg-${job.jobId}`,
 			region: config.region,
 			config: {
 				image: `registry.fly.io/${config.appName}:latest`,
-				// Trick: we are passing the job parameters as environment variables to the machine
-				env: {
-					JOB_ID: job.jobId,
-					INPUT_URL: job.inputUrl,
-					OUTPUT_URL: job.outputUrl,
-					PRESET: job.preset || "default",
-				},
+				// Pass job parameters as environment variables to the machine
+				env,
 				guest: {
 					cpu_kind: "shared",
 					cpus: 1,
