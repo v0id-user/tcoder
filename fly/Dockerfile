@@ -1,21 +1,26 @@
-# Use the official Bun image as the base image
+# Base image with Bun runtime
 FROM oven/bun:latest
 
-# Set the working directory
+# Install FFmpeg
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
 WORKDIR /app
 
-# Copy package files first for better layer caching
+# Copy package files for dependency caching
 COPY package.json bun.lock ./
 
 # Install dependencies
 RUN bun install --frozen-lockfile
 
-# Copy the rest of the application code
+# Copy application code
 COPY . .
 
-# Expose the port that matches fly.toml internal_port
-EXPOSE 8080
+# No EXPOSE - this is not a web server
 
-# Start the application
-CMD ["bun", "run", "machines.ts"]
+# Entry point for one-shot FFmpeg jobs
+# Job parameters passed via environment variables
+CMD ["bun", "run", "ffmpeg-worker/worker.ts"]
 

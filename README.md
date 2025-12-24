@@ -6,6 +6,22 @@ Experimental side project for learning about serverless media transcoding pipeli
 
 A serverless video transcoding pipeline that handles upload, processing, and distribution. The system is event-driven - components react to events rather than polling, which keeps things efficient and scalable.
 
+## First Launch
+
+Set up Fly.io infrastructure for transcoding workers:
+
+```bash
+bun run fly:first-launch
+```
+
+This command:
+1. Authenticates with Fly.io (opens browser for login)
+2. Creates the app if it doesn't exist
+3. Builds the Docker image with FFmpeg and Bun
+4. Pushes the image to Fly.io registry
+
+After first launch, use `bun run fly:deploy` to rebuild and push updated images.
+
 ## Architecture
 
 The pipeline consists of five phases:

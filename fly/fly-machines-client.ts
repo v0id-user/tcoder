@@ -1,0 +1,242 @@
+/**
+ * Fly Machines API Client for Ephemeral FFmpeg Jobs
+ *
+ * Usage pattern:
+ * 1. Deploy image once: `fly deploy --build-only`
+ * 2. Trigger jobs via this client
+ * 3. Each job creates a new machine
+ * 4. Machine auto-stops when FFmpeg exits
+ * 5. Billing only for execution time
+ */
+
+import { Effect, Context, Layer } from "effect";
+import { flyClient } from "./fly-client";
+import type {
+	CreateMachineRequest,
+	Machine,
+} from "./fly-machine-apis";
+
+// Configuration
+interface FlyConfig {
+	readonly apiToken: string;
+	readonly appName: string;
+	readonly region: string;
+}
+
+class FlyConfigService extends Context.Tag("FlyConfigService")<
+	FlyConfigService,
+	FlyConfig
+>() {}
+
+// Job parameters
+interface TranscodeJob {
+	readonly jobId: string;
+	readonly inputUrl: string;
+	readonly outputUrl: string;
+	readonly preset?: string;
+}
+
+type FlyApiError =
+	| { _tag: "HttpError"; status: number; body: string }
+	| { _tag: "InvalidMachineResponse"; raw: unknown }
+	| { _tag: "JobTimeout" };
+
+// Create ephemeral machine for transcoding job
+const createTranscodeMachine = (job: TranscodeJob) =>
+	Effect.gen(function* () {
+		const config = yield* FlyConfigService;
+
+		const request: CreateMachineRequest = {
+			name: `ffmpeg-${job.jobId}`,
+			region: config.region,
+			config: {
+				image: `registry.fly.io/${config.appName}:latest`,
+				env: {
+					JOB_ID: job.jobId,
+					INPUT_URL: job.inputUrl,
+					OUTPUT_URL: job.outputUrl,
+					PRESET: job.preset || "default",
+				},
+				guest: {
+					cpu_kind: "shared",
+					cpus: 1,
+					memory_mb: 512,
+				},
+				restart: {
+					policy: "no",
+				},
+				auto_destroy: true,
+			},
+		};
+
+		const machine = yield* Effect.tryPromise({
+			try: () =>
+				flyClient.Machines_create(
+					{ app_name: config.appName },
+					request,
+					{
+						headers: {
+							Authorization: `Bearer ${config.apiToken}`,
+						},
+					}
+				),
+			catch: (e) => {
+				if (
+					e &&
+					typeof e === "object" &&
+					"response" in e &&
+					e.response &&
+					typeof e.response === "object" &&
+					"status" in e.response &&
+					"data" in e.response
+				) {
+					return {
+						_tag: "HttpError",
+						status: e.response.status as number,
+						body:
+							typeof e.response.data === "string"
+								? e.response.data
+								: JSON.stringify(e.response.data),
+					} as FlyApiError;
+				}
+				return {
+					_tag: "HttpError",
+					status: 0,
+					body:
+						typeof e === "string" ? e : "Network error",
+				} as FlyApiError;
+			},
+		});
+
+		if (!machine.data?.id) {
+			return yield* Effect.fail({
+				_tag: "InvalidMachineResponse",
+				raw: machine.data,
+			} as FlyApiError);
+		}
+
+		return machine.data as Machine;
+	});
+
+// Get machine status
+const getMachineStatus = (machineId: string) =>
+	Effect.gen(function* () {
+		const config = yield* FlyConfigService;
+
+		const machine = yield* Effect.tryPromise({
+			try: () =>
+				flyClient.Machines_show(
+					{
+						app_name: config.appName,
+						machine_id: machineId,
+					},
+					undefined,
+					{
+						headers: {
+							Authorization: `Bearer ${config.apiToken}`,
+						},
+					}
+				),
+			catch: (e) => {
+				if (
+					e &&
+					typeof e === "object" &&
+					"response" in e &&
+					e.response &&
+					typeof e.response === "object" &&
+					"status" in e.response &&
+					"data" in e.response
+				) {
+					return {
+						_tag: "HttpError",
+						status: e.response.status as number,
+						body:
+							typeof e.response.data === "string"
+								? e.response.data
+								: JSON.stringify(e.response.data),
+					} as FlyApiError;
+				}
+				return {
+					_tag: "HttpError",
+					status: 0,
+					body:
+						typeof e === "string" ? e : "Network error",
+				} as FlyApiError;
+			},
+		});
+
+		if (!machine.data?.id) {
+			return yield* Effect.fail({
+				_tag: "InvalidMachineResponse",
+				raw: machine.data,
+			} as FlyApiError);
+		}
+
+		return machine.data as Machine;
+	});
+
+// Wait for machine to complete
+const waitForCompletion = (machineId: string) =>
+	Effect.gen(function* () {
+		let attempts = 0;
+		const maxAttempts = 120;
+
+		while (attempts < maxAttempts) {
+			const status = yield* getMachineStatus(machineId);
+
+			if (
+				status.state === "stopped" ||
+				status.state === "destroyed"
+			) {
+				return status;
+			}
+
+			yield* Effect.sleep("5 seconds");
+			attempts++;
+		}
+
+		return yield* Effect.fail({
+			_tag: "JobTimeout",
+		} as FlyApiError);
+	});
+
+// Complete job execution flow
+export const executeTranscodeJob = (job: TranscodeJob) =>
+	Effect.gen(function* () {
+		// Create and start machine
+		const machine = yield* createTranscodeMachine(job);
+		yield* Effect.log(`Machine created: ${machine.id}`);
+
+		// Wait for completion
+		const completed = yield* waitForCompletion(machine.id);
+		yield* Effect.log(`Machine ${completed.state}: ${completed.id}`);
+
+		return completed;
+	});
+
+// Layer construction
+export const makeFlyConfigLayer = (config: FlyConfig) =>
+	Layer.succeed(FlyConfigService, config);
+
+// Example usage
+export const exampleUsage = Effect.gen(function* () {
+	const job: TranscodeJob = {
+		jobId: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+			? crypto.randomUUID()
+			: Math.random().toString(36).slice(2),
+		inputUrl: "https://example.com/input.mp4",
+		outputUrl: "https://example.com/output.mp4",
+		preset: "web-optimized",
+	};
+
+	const result = yield* executeTranscodeJob(job);
+	return result;
+}).pipe(
+	Effect.provide(
+		makeFlyConfigLayer({
+			apiToken: process.env.FLY_API_TOKEN!,
+			appName: "fly-tcoder-ffmpeg-worker-31657fa",
+			region: "fra",
+		})
+	)
+);
