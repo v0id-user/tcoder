@@ -37,10 +37,13 @@ Think of it like this:
 
 1. You need to transcode a video
 2. Your code calls the Fly Machines API to create a new machine
-3. The machine starts up and runs FFmpeg
-4. When FFmpeg finishes, the process exits
-5. The machine automatically stops
-6. You stop paying
+3. The machine starts up and downloads the input video from R2 storage
+4. FFmpeg transcodes the video (may generate multiple quality variants)
+5. Transcoding outputs are uploaded back to R2 storage
+6. A webhook notification is sent to your Worker API with completion status and output URLs
+7. Temporary files are cleaned up
+8. The process exits and the machine automatically stops
+9. You stop paying
 
 No machines running = no cost. Only pay when work is happening.
 
@@ -82,8 +85,12 @@ No machines running = no cost. Only pay when work is happening.
 - **Runtime**: Bun (fast JavaScript runtime)
 - **Effect System**: Effect-TS for typed error handling
 - **Process Execution**: Bun's native `$` API for shell commands
+- **Storage**: Cloudflare R2 (S3-compatible) for input/output files
 - **Container**: Docker with FFmpeg + Bun
 - **Platform**: Fly.io Machines API
+- **Components**:
+  - R2 Client Service (`r2-client.ts`) - Handles download/upload operations
+  - Webhook Client Service (`webhook-client.ts`) - Sends completion notifications
 
 ## Deployment
 
@@ -106,23 +113,33 @@ This builds and registers the Docker image. **No machines are created yet.**
 Jobs are triggered via the Fly Machines API, not by running containers.
 
 ```typescript
-import { executeTranscodeJob, makeFlyConfigLayer } from "./fly-machines-client";
+import { executeTranscodeJob } from "./machines";
 import { Effect } from "effect";
 
 const job = {
   jobId: crypto.randomUUID(),
-  inputUrl: "https://storage.example.com/input.mp4",
-  outputUrl: "https://storage.example.com/output.mp4",
-  preset: "web-optimized"
+  inputUrl: "https://r2.example.com/inputs/video.mp4?signature=...", // R2 presigned URL
+  outputUrl: "https://r2.example.com/outputs/video.mp4",
+  preset: "web-optimized",
+  apiToken: process.env.FLY_API_TOKEN!,
+  // Optional: Webhook for completion notifications
+  webhookUrl: "https://api.example.com/webhooks/transcode-complete",
+  // Optional: Multiple quality outputs
+  outputQualities: ["480p", "720p", "1080p"],
+  // Optional: R2 config (if not using presigned URLs)
+  r2Config: {
+    accountId: process.env.R2_ACCOUNT_ID!,
+    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    bucketName: process.env.R2_BUCKET_NAME!,
+  }
 };
 
 const program = executeTranscodeJob(job).pipe(
   Effect.provide(
-    makeFlyConfigLayer({
-      apiToken: process.env.FLY_API_TOKEN!,
-      appName: "fly-tcoder-ffmpeg-worker-31657fa",
-      region: "fra"
-    })
+    Layer.mergeAll(
+      // Add your Fly config layer here
+    )
   )
 );
 
@@ -132,9 +149,9 @@ Effect.runPromise(program);
 ### 3. Machine Lifecycle
 
 ```
-API Request → Machine Created → FFmpeg Runs → Process Exits → Machine Stops → Billing Ends
-              ↑                                              ↓
-              Image from registry                            Auto-destroy
+API Request → Machine Created → Download from R2 → FFmpeg Transcodes → Upload to R2 → Webhook Notification → Cleanup → Process Exits → Machine Stops → Billing Ends
+              ↑                                                                                                                                    ↓
+              Image from registry                                                                                                                  Auto-destroy
 ```
 
 ## Cost Analysis
@@ -161,12 +178,21 @@ API Request → Machine Created → FFmpeg Runs → Process Exits → Machine St
 
 Each job receives:
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `JOB_ID` | Unique job identifier | `550e8400-e29b-41d4-a716-446655440000` |
-| `INPUT_URL` | Source media URL | `https://cdn.example.com/video.mp4` |
-| `OUTPUT_URL` | Destination URL | `https://storage.example.com/out.mp4` |
-| `PRESET` | FFmpeg preset | `web-optimized`, `hls`, `default` |
+| Variable | Description | Required | Example |
+|----------|-------------|----------|---------|
+| `JOB_ID` | Unique job identifier | Yes | `550e8400-e29b-41d4-a716-446655440000` |
+| `INPUT_URL` | Source media URL (R2 presigned URL or direct URL) | Yes | `https://r2.example.com/video.mp4?signature=...` |
+| `OUTPUT_URL` | Base destination URL in R2 | Yes | `https://r2.example.com/outputs/video.mp4` |
+| `PRESET` | FFmpeg preset | No | `web-optimized`, `hls`, `hls-adaptive`, `default` |
+| `WEBHOOK_URL` | Worker API endpoint for completion notifications | No | `https://api.example.com/webhooks/transcode-complete` |
+| `OUTPUT_QUALITIES` | Comma-separated quality list for multi-output | No | `480p,720p,1080p` |
+| `R2_ACCOUNT_ID` | Cloudflare R2 account ID (for direct bucket access) | No* | `abc123def456` |
+| `R2_ACCESS_KEY_ID` | R2 access key ID | No* | `your-access-key` |
+| `R2_SECRET_ACCESS_KEY` | R2 secret access key | No* | `your-secret-key` |
+| `R2_BUCKET_NAME` | R2 bucket name | No* | `video-storage` |
+| `R2_ENDPOINT` | Custom R2 endpoint URL | No | `https://abc123.r2.cloudflarestorage.com` |
+
+\* Required only if using direct bucket access instead of presigned URLs
 
 ## Presets
 
@@ -258,22 +284,29 @@ Your Cloudflare Worker should:
 
 1. Receive transcode request
 2. Store job metadata in database
-3. Call `executeTranscodeJob()` with Fly config
-4. Poll or webhook for completion
-5. Update job status
+3. Call `executeTranscodeJob()` with Fly config and webhook URL
+4. Receive webhook notification when transcoding completes
+5. Update job status with output URLs
+
+### Triggering a Job
 
 ```typescript
 // In your Cloudflare Worker
-import { executeTranscodeJob } from "./fly-machines-client";
+import { executeTranscodeJob } from "./machines";
+import { Effect } from "effect";
 
 app.post("/transcode", async (c) => {
   const { inputUrl, outputUrl } = await c.req.json();
+  const jobId = crypto.randomUUID();
 
   const job = {
-    jobId: crypto.randomUUID(),
-    inputUrl,
-    outputUrl,
-    preset: "web-optimized"
+    jobId,
+    inputUrl, // R2 presigned URL
+    outputUrl, // Base R2 output URL
+    preset: "web-optimized",
+    apiToken: process.env.FLY_API_TOKEN!,
+    webhookUrl: `${c.env.WORKER_URL}/webhooks/transcode-complete`, // Your webhook endpoint
+    outputQualities: ["480p", "720p", "1080p"], // Optional: multiple qualities
   };
 
   // Trigger job (non-blocking)
@@ -281,7 +314,46 @@ app.post("/transcode", async (c) => {
     .pipe(Effect.provide(flyConfigLayer))
     .pipe(Effect.runPromise);
 
-  return c.json({ jobId: job.jobId, machineId: machine.id });
+  return c.json({ jobId, machineId: machine.id });
+});
+```
+
+### Receiving Webhook Notifications
+
+```typescript
+// Webhook endpoint in your Cloudflare Worker
+app.post("/webhooks/transcode-complete", async (c) => {
+  const payload = await c.req.json();
+  
+  // payload structure:
+  // {
+  //   jobId: string,
+  //   status: "completed" | "failed",
+  //   inputUrl: string,
+  //   outputs: Array<{ quality: string, url: string, preset: string }>,
+  //   error?: string,
+  //   duration?: number
+  // }
+
+  if (payload.status === "completed") {
+    // Update database with output URLs
+    await updateJobStatus(payload.jobId, {
+      status: "completed",
+      outputs: payload.outputs,
+      duration: payload.duration,
+    });
+    
+    // Notify client via WebSocket or push notification
+    await notifyClient(payload.jobId, payload.outputs);
+  } else {
+    // Handle failure
+    await updateJobStatus(payload.jobId, {
+      status: "failed",
+      error: payload.error,
+    });
+  }
+
+  return c.json({ ok: true });
 });
 ```
 
@@ -298,8 +370,37 @@ To stay under $5/month:
 
 ## Security
 
-- **Never commit** `FLY_API_TOKEN` to git
-- **Use secrets** for sensitive URLs
+- **Never commit** `FLY_API_TOKEN` or R2 credentials to git
+- **Use secrets** for sensitive URLs and API keys
+- **Use presigned URLs** when possible instead of storing R2 credentials in machines
 - **Validate inputs** before creating machines
 - **Set timeouts** to prevent runaway costs
 - **Monitor anomalies** in machine creation rate
+- **Secure webhook endpoints** with authentication tokens
+- **Rotate R2 credentials** regularly if using direct bucket access
+
+## Pipeline Components
+
+The worker consists of several Effect-based services:
+
+### R2 Client (`r2-client.ts`)
+- Downloads input videos from R2 (presigned URLs or direct bucket access)
+- Uploads transcoded outputs to R2 with metadata
+- Handles errors with typed error channels
+- **TODO**: Replace mock implementations with actual R2 SDK (`@aws-sdk/client-s3`)
+
+### Webhook Client (`webhook-client.ts`)
+- Sends completion notifications to Worker API
+- Includes job results, output URLs, and error information
+- Implements Phase 4 (Discoverability Phase) from architecture
+- **TODO**: Add retry logic with exponential backoff and timeout handling
+
+### Worker (`worker.ts`)
+- Orchestrates the complete pipeline:
+  1. Download input from R2
+  2. Execute FFmpeg transcoding
+  3. Upload outputs to R2
+  4. Send webhook notification
+  5. Cleanup temporary files
+- Supports multiple output qualities
+- Proper error handling and cleanup on failure
