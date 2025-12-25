@@ -26,6 +26,20 @@ export interface SpawnConfig {
 	readonly webhookBaseUrl: string;
 }
 
+// =============================================================================
+// Dev Mode Detection
+// =============================================================================
+
+/**
+ * Check if we're in dev mode (local development with Docker worker).
+ * In dev mode, we skip machine spawning and let the local Docker worker handle jobs.
+ */
+const isDevMode = (config: SpawnConfig): boolean => {
+	// Check if FLY_API_TOKEN is missing or if we're explicitly in dev mode
+	// In dev, the Docker worker runs locally and picks up jobs from Redis
+	return !config.flyApiToken || config.flyApiToken === "" || process.env.NODE_ENV === "development";
+};
+
 export interface SpawnResult {
 	readonly machineId: string;
 	readonly state: string;
@@ -212,16 +226,23 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 /**
  * Check if we should spawn a new worker.
  * Called when a new job is enqueued.
+ * In dev mode, skips spawning and lets the local Docker worker handle jobs.
  */
 export const maybeSpawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult | null, SpawnerError, RedisService> =>
 	Effect.gen(function* () {
+		// Skip machine spawning in dev mode - local Docker worker will handle jobs
+		if (isDevMode(config)) {
+			yield* Console.log("[Spawner] Dev mode: Skipping machine spawn (local Docker worker will handle jobs)");
+			return null;
+		}
+
 		// Quick capacity check without reserving
 		const { client } = yield* RedisService;
 
-		const activeCount = yield* Effect.tryPromise({
+		const poolEntries = yield* Effect.tryPromise({
 			try: async () => {
-				const count = await client.get<string>("counters:active_machines");
-				return Number(count || 0);
+				const data = await client.hgetall<Record<string, string>>(RedisKeys.machinesPool);
+				return data || {};
 			},
 			catch: (e) => ({
 				_tag: "CommandError" as const,
@@ -229,8 +250,10 @@ export const maybeSpawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult
 			}),
 		});
 
-		if (activeCount >= RWOS_CONFIG.MAX_MACHINES) {
-			yield* Console.log(`[Spawner] At capacity (${activeCount}/${RWOS_CONFIG.MAX_MACHINES})`);
+		const poolSize = Object.keys(poolEntries).length;
+
+		if (poolSize >= RWOS_CONFIG.MAX_MACHINES) {
+			yield* Console.log(`[Spawner] At capacity (${poolSize}/${RWOS_CONFIG.MAX_MACHINES})`);
 			return null;
 		}
 

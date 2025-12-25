@@ -1,6 +1,6 @@
 # Fly.io FFmpeg Workers with Redis Orchestration (RWOS)
 
-TTL-bounded FFmpeg workers orchestrated via Redis. Each worker processes multiple jobs before exiting, minimizing Fly API calls and costs.
+Pooled FFmpeg workers orchestrated via Redis. Machines are stopped when idle and reused when jobs arrive, minimizing Fly API calls and costs.
 
 ## Table of Contents
 
@@ -33,40 +33,44 @@ The system uses a **control plane / worker plane** split:
 ## How It Works
 
 1. **Job Submission**: Client submits job → Cloudflare Worker enqueues to Redis
-2. **Admission Control**: Check rate limit (1 req/sec) + capacity (max 5 machines)
-3. **Worker Spawn**: If capacity available, create Fly Machine via API
-4. **Job Processing**: Worker acquires lease, pops jobs from queue, processes
-5. **Multi-Job Loop**: Worker processes 1-3 jobs until TTL (5 min) or max jobs
-6. **Graceful Exit**: Worker releases lease, decrements counter, exits
-7. **Failure Recovery**: Cron job detects dead workers, requeues stale jobs
+2. **Admission Control**: Check pool capacity (max 10 machines: running + stopped)
+3. **Machine Reuse**: Check stopped machines first, start one if available
+4. **Machine Spawn**: If no stopped machines and pool not full, create new machine
+5. **Job Processing**: Worker polls queue indefinitely, pops jobs, processes
+6. **State Updates**: Worker updates pool state: "running" when processing, "idle" when waiting
+7. **Idle Management**: Cron stops machines idle for 5+ minutes, adds to stopped pool
 
 ```
-Job Submitted → Redis Queue → Worker Pops → FFmpeg → R2 Upload → Webhook → Next Job or Exit
+Job Submitted → Redis Queue → Worker Pops → FFmpeg → R2 Upload → Webhook → Next Job or Wait
                     ↑                                                              ↓
-              Cron requeues                                              Lease released
-              stale jobs                                                 Counter decremented
+              Pool Management                                              State: idle
+              (reuse stopped)                                             (poll continues)
+                                                                           ↓
+                                                                    Cron stops if
+                                                                    idle > 5 min
 ```
 
 ## Key Differences from Ephemeral Model
 
-| Aspect | Old (Ephemeral) | New (RWOS) |
-|--------|-----------------|------------|
-| Jobs per machine | 1 | 1-3 (configurable) |
-| Machine lifetime | Job duration | TTL-bounded (5 min) |
+| Aspect | Old (Ephemeral) | New (Pooled RWOS) |
+|--------|-----------------|-------------------|
+| Jobs per machine | 1 | Unlimited (indefinite polling) |
+| Machine lifetime | Job duration | Until stopped (idle > 5 min) |
 | Job discovery | Env vars at creation | Redis queue polling |
-| State management | None | Redis leases + counters |
+| State management | None | Redis pool (running/idle/stopped) |
+| Machine reuse | None | Stopped machines restarted |
 | Failure handling | None | Automatic requeue |
-| API calls | 1 per job | 1 per 3 jobs |
-| Observability | Fly logs only | Redis + logs |
+| API calls | 1 per job | Minimal (reuse stopped machines) |
+| Observability | Fly logs only | Redis pool + logs |
 
 ## RWOS Components
 
 ### Control Plane (Cloudflare Worker)
 
 - **Hono API**: Job submission endpoints (`POST /api/jobs`)
-- **Admission Controller**: Rate limiting + capacity enforcement
-- **Machine Spawner**: Fly API calls with exponential backoff
-- **Cron Handler**: Stale job recovery (every minute)
+- **Admission Controller**: Pool-based capacity enforcement (max 10 machines)
+- **Machine Spawner**: Reuses stopped machines first, creates new if needed
+- **Cron Handler**: Stops idle machines (every minute), adds to stopped pool
 
 ### State Store (Upstash Redis)
 
@@ -75,14 +79,13 @@ Job Submitted → Redis Queue → Worker Pops → FFmpeg → R2 Upload → Webho
 | `jobs:pending` | ZSET | Job queue sorted by timestamp |
 | `jobs:active` | HASH | job_id → machine_id mapping |
 | `jobs:status:{id}` | HASH | Job metadata and status |
-| `workers:leases` | HASH | machine_id → expiry timestamp |
-| `counters:active_machines` | STRING | Current machine count |
-| `counters:rate_limit` | STRING | API rate limit (1s TTL) |
+| `machines:pool` | HASH | machine_id → JSON {state, lastActiveAt, createdAt} |
+| `machines:stopped` | SET | machineIds available to start |
 
 ### Compute Plane (Fly Machine)
 
-- **Redis Client**: Polls job queue, updates status
-- **Lease Manager**: Acquires/extends/releases leases
+- **Redis Client**: Polls job queue indefinitely, updates status
+- **Pool Manager**: Updates pool state (running/idle), tracks lastActiveAt
 - **FFmpeg Pipeline**: Download → transcode → upload
 - **Webhook Client**: Notifies control plane on completion
 
@@ -91,38 +94,39 @@ Job Submitted → Redis Queue → Worker Pops → FFmpeg → R2 Upload → Webho
 ![Worker Lifecycle](../design/architecture/RWOS/Worker%20Lifecycle.png)
 
 **States:**
-1. **Starting**: Machine boots, connects to Redis
-2. **Active**: Polling queue for jobs
-3. **Processing**: Running FFmpeg pipeline
-4. **Draining**: TTL near or max jobs reached
-5. **Exiting**: Cleanup and exit
+1. **Starting**: Machine boots, connects to Redis, initializes in pool
+2. **Running**: Processing jobs, updates pool state to "running"
+3. **Idle**: No jobs available, waiting and polling, updates pool state to "idle"
+4. **Stopped**: Stopped by cron when idle > 5 minutes, added to stopped pool
 
 **Transitions:**
-- Active → Processing: Job popped from queue
-- Processing → Active: Job completed
-- Active → Draining: TTL < 60s OR jobs ≥ 3
-- Draining → Exiting: Current job done
-- Active → Exiting: No jobs + TTL expired
+- Starting → Running: Pool entry created, ready to process
+- Running → Idle: No jobs available, continue polling
+- Idle → Running: Job popped from queue
+- Idle → Stopped: Cron stops machine (idle > 5 min)
+- Stopped → Running: Machine restarted when jobs arrive
 
 ## Admission Control
 
 ![Admission Control Flow](../design/architecture/RWOS/Admission%20Control%20Flow.png)
 
-**Rate Limiting:**
+**Machine Reuse (First Priority):**
 ```
-INCR counters:rate_limit (TTL 1s)
-if count > 1: wait 1s, retry
+SPOP machines:stopped
+if machine_id found: start machine via Fly API
+else: check pool capacity
 ```
 
-**Capacity Check:**
+**Pool Capacity Check:**
 ```
-GET counters:active_machines
-if count >= 5: job stays queued
-else: INCR counter, create machine
+HGETALL machines:pool
+count = running + stopped machines
+if count >= 10: job stays queued
+else: create new machine
 ```
 
 **Backoff on Fly API errors:**
-- 429 (rate limit): exponential backoff
+- 429 (rate limit): exponential backoff (Fly handles rate limiting)
 - 5xx: retry with backoff
 - Max 5 retries
 
@@ -145,10 +149,22 @@ jobs:status:{job_id}
 └── retries: number
 ```
 
-### Worker Lease
+### Machine Pool Entry
 ```
-workers:leases
-├── {machine_id}: expiry_timestamp
+machines:pool
+├── {machine_id}: JSON {
+│   ├── state: "running" | "idle" | "stopped"
+│   ├── lastActiveAt: timestamp
+│   └── createdAt: timestamp
+│   }
+└── ...
+```
+
+### Stopped Machines Set
+```
+machines:stopped
+├── {machine_id_1}
+├── {machine_id_2}
 └── ...
 ```
 
@@ -219,24 +235,30 @@ bun run deploy
 
 ## Cost Analysis
 
-**RWOS reduces costs by processing multiple jobs per machine:**
+**Pooled RWOS reduces costs by reusing machines:**
 
-| Metric | Ephemeral (1 job/machine) | RWOS (3 jobs/machine) |
-|--------|---------------------------|------------------------|
-| Machine creates/day | 100 | 34 |
-| Fly API calls/day | 100 | 34 |
-| Startup overhead | 100× | 34× |
-| Effective cost | 100% | ~70% |
+| Metric | Ephemeral (1 job/machine) | Pooled RWOS |
+|--------|---------------------------|-------------|
+| Machine creates/day | 100 | ~10-20 (reused) |
+| Fly API calls/day | 100 | ~10-20 (mostly starts) |
+| Startup overhead | 100× | ~10-20× |
+| Effective cost | 100% | ~10-20% |
 
 **Pricing (512MB shared CPU):**
 - ~$0.0004/second
 - ~$0.024/minute
-- 5 min TTL = ~$0.12/machine
-- 3 jobs/machine = ~$0.04/job
+- Machines only run when processing jobs
+- Stopped machines cost $0 (billing stops)
+
+**Cost Savings:**
+- Machines stopped when idle (no cost)
+- Reused when jobs arrive (no create overhead)
+- Only pay for active processing time
+- Pool size limit (10) prevents runaway costs
 
 **Budget targets:**
-- $5/month ≈ 125 jobs (at 3/machine, 5 min TTL)
-- $10/month ≈ 250 jobs
+- $5/month ≈ 200+ jobs (with reuse)
+- $10/month ≈ 400+ jobs
 
 ## Monitoring
 
@@ -248,7 +270,7 @@ curl https://your-worker.workers.dev/api/stats
 Response:
 ```json
 {
-  "machines": { "activeMachines": 2, "maxMachines": 5 },
+  "machines": { "activeMachines": 8, "maxMachines": 10 },
   "pendingJobs": 5,
   "activeJobs": 2,
   "activeJobIds": ["job-123", "job-456"]
@@ -293,9 +315,9 @@ fly machines list
 # Destroy all machines
 fly machines list --json | jq -r '.[].id' | xargs -I {} fly machine destroy {} --force
 
-# Reset Redis counters (via redis-cli or Upstash console)
-SET counters:active_machines 0
-DEL workers:leases
+# Reset Redis pool (via redis-cli or Upstash console)
+DEL machines:pool
+DEL machines:stopped
 ```
 
 ## Security

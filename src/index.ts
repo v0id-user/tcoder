@@ -61,6 +61,13 @@ export default {
 async function handleScheduled(env: Env) {
 	const redis = Redis.fromEnv(env);
 
+	// Skip machine stopping in dev mode - local Docker worker runs continuously
+	if (!env.FLY_API_TOKEN || env.FLY_API_TOKEN === "" || process.env.NODE_ENV === "development") {
+		console.log("[Cron] Dev mode: Skipping idle machine stop (local Docker worker runs continuously)");
+		await recoverStuckUploadingJobs(env);
+		return;
+	}
+
 	console.log("[Cron] Checking for idle machines to stop...");
 
 	try {

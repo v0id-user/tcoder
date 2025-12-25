@@ -20,11 +20,11 @@ The pipeline consists of seven phases:
 
 1. **Authorization** - Client requests presigned upload URL from control plane
 2. **Ingestion** - Client uploads directly to R2, triggers Cloudflare Queue event notification
-3. **Orchestration (RWOS)** - Control plane enqueues job to Redis, checks rate limits and capacity, spawns Fly Machine if needed
-4. **Processing** - Fly Machine acquires lease, polls Redis queue, processes multiple jobs (up to 3) within TTL (5 min), uploads outputs to R2
+3. **Orchestration (RWOS)** - Control plane enqueues job to Redis, checks pool capacity, reuses stopped machines or spawns new ones
+4. **Processing** - Fly Machine polls Redis queue indefinitely, processes jobs, updates pool state (running/idle), uploads outputs to R2
 5. **Discoverability** - Worker sends webhook to control plane, updates job status in Redis
 6. **Distribution** - Client fetches transcoded video via CDN
-7. **Recovery** - Cron job (every minute) detects expired worker leases, requeues stale jobs
+7. **Idle Management** - Cron job (every minute) stops machines idle for 5+ minutes, adds them to stopped pool for reuse
 
 ### RWOS Components
 
@@ -32,51 +32,50 @@ The pipeline consists of seven phases:
 
 **Control Plane (Cloudflare Worker):**
 - **Hono API** - Job submission endpoints (`POST /api/upload`, `GET /api/jobs/:id`)
-- **Admission Controller** - Rate limiting (1 req/sec) + capacity enforcement (max 5 machines)
-- **Machine Spawner** - Fly API calls with exponential backoff retry
-- **Cron Handler** - Stale job recovery, expired lease cleanup
+- **Admission Controller** - Pool-based capacity enforcement (max 10 machines total: running + stopped)
+- **Machine Spawner** - Reuses stopped machines first, creates new ones if pool not full
+- **Cron Handler** - Stops idle machines (idle > 5 min), adds to stopped pool
 
 **State Store (Upstash Redis):**
 - `jobs:pending` (ZSET) - Job queue sorted by timestamp
 - `jobs:active` (HASH) - job_id → machine_id mapping
 - `jobs:status:{id}` (HASH) - Job metadata and status
-- `workers:leases` (HASH) - machine_id → expiry timestamp
-- `counters:active_machines` (STRING) - Current machine count
-- `counters:rate_limit` (STRING) - API rate limit counter (1s TTL)
+- `machines:pool` (HASH) - machine_id → JSON {state, lastActiveAt, createdAt}
+- `machines:stopped` (SET) - machineIds available to start
 
 **Compute Plane (Fly Machine):**
-- TTL-bounded workers (5 minute lifetime)
-- Process 1-3 jobs per worker (configurable)
+- Pooled workers that poll indefinitely (no TTL)
+- Machines stopped when idle for 5+ minutes, reused when jobs arrive
 - Uses `@upstash/redis` HTTP client (same API as Cloudflare Worker)
 - Poll Redis queue with `ZPOPMIN` (atomic job claim)
-- Graceful drain mode when TTL < 60s or max jobs reached
+- Updates pool state: "running" when processing, "idle" when waiting
 
 ### Admission Control Flow
 
 ![Admission Control Flow](./design/architecture/RWOS/Admission%20Control%20Flow.png)
 
 When a job is submitted:
-1. **Rate Limit Check** - `INCR counters:rate_limit` (TTL 1s), retry if count > 1
-2. **Capacity Check** - `GET counters:active_machines`, proceed if < MAX_MACHINES (5)
-3. **Reserve Slot** - `INCR counters:active_machines` (atomic reservation)
-4. **Create Machine** - POST to Fly Machines API with exponential backoff
-5. **Register Lease** - `HSET workers:leases` with expiry timestamp
+1. **Check Stopped Machines** - `SPOP machines:stopped`, if found: start machine via Fly API
+2. **Pool Capacity Check** - `HGETALL machines:pool`, count running + stopped machines
+3. **Reuse or Create** - If stopped machine found: start it; else if pool < MAX_MACHINES (10): create new
+4. **Update Pool** - `HSET machines:pool` with state "running", update lastActiveAt
+5. **Add to Pool** - New machines added to pool, stopped machines removed from stopped set
 
 ### Worker Lifecycle
 
 ![Worker Lifecycle](./design/architecture/RWOS/Worker%20Lifecycle.png)
 
 **States:**
-- **Starting** - Machine boots, connects to Redis, acquires lease
-- **Active** - Polling queue, processing jobs (up to 3), checking TTL
-- **Draining** - TTL < 60s or max jobs reached, no new jobs accepted
-- **Exiting** - Release lease, decrement counter, cleanup, exit
+- **Starting** - Machine boots, connects to Redis, initializes in pool
+- **Running** - Processing jobs, updates pool state and lastActiveAt
+- **Idle** - No jobs available, waiting and polling, updates pool state to "idle"
+- **Stopped** - Stopped by cron when idle > 5 minutes, added to stopped pool for reuse
 
 **Key Constants:**
-- TTL: 5 minutes
-- MAX_JOBS: 3 per worker
+- IDLE_TIMEOUT: 5 minutes (before stopping)
 - POLL_INTERVAL: 5 seconds
-- DRAIN_BUFFER: 60 seconds before TTL expiry
+- MAX_MACHINES: 10 (running + stopped in pool)
+- Workers poll indefinitely until stopped externally
 
 ## Quick Start
 
@@ -214,7 +213,7 @@ curl https://tcoder.workers.dev/api/stats
 Response:
 ```json
 {
-  "machines": { "activeMachines": 2, "maxMachines": 5 },
+  "machines": { "activeMachines": 8, "maxMachines": 10 },
   "pendingJobs": 5,
   "activeJobs": 2
 }
@@ -285,9 +284,10 @@ tcoder/
 │   │   ├── client.ts         # Upstash Redis client
 │   │   └── schema.ts         # Redis keys and types
 │   └── orchestration/
-│       ├── admission.ts      # Rate limiting + capacity control
+│       ├── admission.ts      # Pool-based capacity control
 │       ├── job-manager.ts    # Job queue operations
-│       └── spawner.ts        # Fly Machine creation
+│       ├── machine-pool.ts   # Machine pool management (start/stop/sync)
+│       └── spawner.ts        # Fly Machine creation/reuse
 ├── fly/
 │   ├── ffmpeg-worker/        # Fly Machine worker code
 │   ├── Dockerfile            # Worker container
@@ -300,11 +300,11 @@ tcoder/
 
 | Component | Layer | Purpose |
 |-----------|-------|---------|
-| **Cloudflare Worker** | Control Plane | API endpoints, admission control, machine spawning, R2 event handling, cron recovery |
-| **Upstash Redis** | State Store | Job queue (ZSET), worker leases (HASH), concurrency counters, job status tracking |
+| **Cloudflare Worker** | Control Plane | API endpoints, admission control, machine pool management, R2 event handling, cron idle management |
+| **Upstash Redis** | State Store | Job queue (ZSET), machine pool (HASH), stopped machines (SET), job status tracking |
 | **Cloudflare R2** | Storage | Object storage for input/output video files, presigned URL generation |
 | **Cloudflare Queues** | Event Delivery | R2 event notifications (object-create → queue → worker handler) |
-| **Fly.io Machines** | Compute Plane | TTL-bounded FFmpeg workers, multi-job processing, webhook notifications |
+| **Fly.io Machines** | Compute Plane | Pooled FFmpeg workers, indefinite polling, stopped when idle, reused when jobs arrive |
 | **Bunny CDN** | Distribution | Video streaming CDN (optional, outputs can be served directly from R2) |
 
 **See [Architecture Diagrams](./design/architecture/RWOS/) for detailed system design.**
@@ -316,6 +316,7 @@ tcoder/
 cp env.local.example .env
 cp env.local.example .dev.vars
 # Fill in R2 credentials in both files
+# Note: FLY_API_TOKEN can be empty in dev mode
 
 # Start everything
 bun run dev
@@ -324,9 +325,15 @@ bun run dev
 Starts everything:
 - **Redis** - Local Redis container
 - **SRH Proxy** - Upstash-compatible HTTP API at `localhost:8079`
-- **Fly-worker** - Docker container polling Redis for jobs
+- **Fly-worker** - Docker container polling Redis for jobs (runs continuously)
 - **Wrangler dev** - API at `localhost:8787`
 - **Scheduled trigger** - Hits cron endpoint every 5 minutes
+
+**Dev Mode Behavior:**
+- Machine spawning is **skipped** (no Fly API calls)
+- Local Docker worker handles all jobs from Redis queue
+- Cron skips machine management (no stopping idle machines)
+- Jobs are enqueued normally and processed by Docker worker
 
 **Prerequisites:**
 - Bun runtime
