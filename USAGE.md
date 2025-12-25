@@ -20,7 +20,7 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/"
 ```json
 {
   "status": "ok",
-  "service": "rwos"
+  "service": "tcoder"
 }
 ```
 

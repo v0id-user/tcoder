@@ -16,7 +16,7 @@ import { type MessageBatch, type R2EventNotification, handleR2Events } from "./r
 const app = new Hono();
 
 // Health check
-app.get("/", (c) => c.json({ status: "ok", service: "rwos" }));
+app.get("/", (c) => c.json({ status: "ok", service: "tcoder" }));
 
 // Mount API routes
 app.route("/api", createRoutes());
