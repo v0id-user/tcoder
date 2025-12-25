@@ -9,7 +9,7 @@ import { Console, Effect } from "effect";
 import { flyClient } from "../../fly/fly-client";
 import type { Machine } from "../../fly/fly-machine-apis";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
-import { RWOS_CONFIG, RedisKeys, serializeMachinePoolEntry, deserializeMachinePoolEntry } from "../redis/schema";
+import { RWOS_CONFIG, RedisKeys, deserializeMachinePoolEntry, serializeMachinePoolEntry } from "../redis/schema";
 
 // =============================================================================
 // Types

@@ -18,7 +18,7 @@
 import { unlink } from "node:fs/promises";
 import { $ } from "bun";
 import { Console, Effect, Exit, Layer } from "effect";
-import { LEASE_CONFIG, completeJob, failJob, getJobData, popJob, cleanupWorker, initializeWorker, updateMachineState } from "./lease";
+import { LEASE_CONFIG, cleanupWorker, completeJob, failJob, getJobData, initializeWorker, popJob, updateMachineState } from "./lease";
 import { R2ClientService, extractR2Key, getTempFilePath } from "./r2-client";
 import { makeR2ClientLayer } from "./r2-client";
 import { makeRedisLayer } from "./redis-client";

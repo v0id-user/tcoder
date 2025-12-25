@@ -11,7 +11,7 @@ import type { CreateMachineRequest, Machine } from "../../fly/fly-machine-apis";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
 import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
 import { acquireMachineSlot, releaseMachineSlot } from "./admission";
-import { popStoppedMachine, startMachine, addMachineToPool } from "./machine-pool";
+import { addMachineToPool, popStoppedMachine, startMachine } from "./machine-pool";
 
 // =============================================================================
 // Types
