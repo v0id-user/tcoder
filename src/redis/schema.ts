@@ -145,6 +145,9 @@ export const RWOS_CONFIG = {
 
 	/** Presigned URL expiry (1 hour) */
 	PRESIGNED_URL_EXPIRY_SECONDS: 3600,
+
+	/** Buffer time after presigned URL expiry before recovery kicks in (5 minutes) */
+	UPLOADING_RECOVERY_BUFFER_SECONDS: 300,
 } as const;
 
 // =============================================================================

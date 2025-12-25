@@ -195,6 +195,75 @@ async function updateJobFromEvent(
 }
 
 /**
+ * Recovery environment interface (includes R2 bucket access)
+ */
+export interface RecoveryEnv extends Env {
+	INPUT_BUCKET: R2Bucket;
+}
+
+/**
+ * Recover a job stuck in "uploading" status.
+ * Checks if file exists in R2 and transitions job to "pending" if found.
+ */
+export async function recoverUploadingJob(
+	redis: RedisClient,
+	env: RecoveryEnv,
+	jobId: string,
+	inputKey: string,
+): Promise<boolean> {
+	try {
+		// Check if file exists in R2
+		const object = await env.INPUT_BUCKET.head(inputKey);
+		if (!object) {
+			// File doesn't exist yet
+			return false;
+		}
+
+		const now = Date.now();
+
+		// Get existing job data to preserve fields
+		const existingData = await redis.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId));
+		if (!existingData || Object.keys(existingData).length === 0) {
+			console.log(`[Recovery] Job ${jobId} not found in Redis`);
+			return false;
+		}
+
+		// Check if job is still in "uploading" status (avoid race conditions)
+		if (existingData.status !== "uploading") {
+			console.log(`[Recovery] Job ${jobId} already transitioned to ${existingData.status}`);
+			return false;
+		}
+
+		// Build input URL
+		const inputUrl = `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.R2_INPUT_BUCKET_NAME}/${inputKey}`;
+
+		// Update job status to pending (ready for processing)
+		const updates: Record<string, string> = {
+			status: "pending",
+			inputUrl,
+			uploadedAt: String(now),
+			queuedAt: String(now),
+		};
+
+		// Store job and enqueue atomically
+		const pipe = redis.pipeline();
+		pipe.hset(RedisKeys.jobStatus(jobId), updates);
+		pipe.zadd(RedisKeys.jobsPending, { score: now, member: jobId });
+		await pipe.exec();
+
+		console.log(`[Recovery] Recovered and enqueued job ${jobId} (file found in R2)`);
+
+		// Try to spawn a worker
+		await trySpawnWorker(env);
+
+		return true;
+	} catch (error) {
+		console.error(`[Recovery] Error recovering job ${jobId}:`, error);
+		return false;
+	}
+}
+
+/**
  * Attempt to spawn a worker if capacity is available
  */
 async function trySpawnWorker(env: Env): Promise<void> {

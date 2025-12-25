@@ -11,7 +11,14 @@
 import { Redis } from "@upstash/redis/cloudflare";
 import { Hono } from "hono";
 import { createRoutes, createWebhookRoutes } from "./api/routes";
-import { type MessageBatch, type R2EventNotification, handleR2Events } from "./r2/events";
+import {
+	type MessageBatch,
+	type R2EventNotification,
+	type RecoveryEnv,
+	handleR2Events,
+	recoverUploadingJob,
+} from "./r2/events";
+import { RWOS_CONFIG, RedisKeys, deserializeJobData } from "./redis/schema";
 
 const app = new Hono();
 
@@ -136,6 +143,127 @@ async function handleScheduled(env: Env) {
 		console.log(`[Cron] Requeued ${jobsToRequeue.length} jobs, cleaned ${expiredMachines.length} leases`);
 	} catch (e) {
 		console.error("[Cron] Error:", e);
+	}
+
+	// Recover stuck uploading jobs
+	try {
+		await recoverStuckUploadingJobs(env);
+	} catch (e) {
+		console.error("[Cron] Error recovering uploading jobs:", e);
+	}
+}
+
+/**
+ * Recover jobs stuck in "uploading" status.
+ * Checks for jobs that should have transitioned to "pending" but didn't due to missing R2 events.
+ */
+async function recoverStuckUploadingJobs(env: Env) {
+	const redis = Redis.fromEnv(env);
+	const now = Date.now();
+
+	// Calculate recovery threshold: presigned URL expiry + buffer
+	const recoveryThresholdMs =
+		(RWOS_CONFIG.PRESIGNED_URL_EXPIRY_SECONDS + RWOS_CONFIG.UPLOADING_RECOVERY_BUFFER_SECONDS) * 1000;
+
+	console.log("[Cron] Checking for stuck uploading jobs...");
+
+	// Try to find uploading jobs by scanning job status keys
+	// Note: This is a best-effort approach. For production, consider maintaining a SET of uploading job IDs.
+	let cursor: string | number = 0;
+	let checkedCount = 0;
+	let recoveredCount = 0;
+	let failedCount = 0;
+	const maxChecks = 100; // Limit checks per cron run to avoid timeout
+
+	try {
+		// Use SCAN to find job status keys (pattern: jobs:status:*)
+		// Upstash Redis REST API supports SCAN with cursor
+		do {
+			const result: [string | number, string[]] = await redis.scan(cursor, {
+				match: "jobs:status:*",
+				count: 50,
+			});
+			// SCAN returns [cursor, keys[]] where cursor can be string or number
+			cursor = typeof result[0] === "string" ? result[0] : Number(result[0]);
+			const keys = (Array.isArray(result[1]) ? result[1] : []) as string[];
+
+			for (const key of keys) {
+				if (checkedCount >= maxChecks) {
+					console.log(`[Cron] Reached max checks limit (${maxChecks}), stopping scan`);
+					break;
+				}
+
+				checkedCount++;
+
+				// Extract job ID from key (format: jobs:status:{jobId})
+				const jobId = key.replace("jobs:status:", "");
+				if (!jobId) continue;
+
+				// Get job data
+				const jobData = await redis.hgetall<Record<string, string>>(key);
+				if (!jobData || Object.keys(jobData).length === 0) continue;
+
+				const job = deserializeJobData(jobData);
+				if (!job) continue;
+
+				// Only process jobs in "uploading" status
+				if (job.status !== "uploading") continue;
+
+				// Check if job is old enough to recover
+				const jobAge = now - job.timestamps.createdAt;
+				if (jobAge < recoveryThresholdMs) {
+					// Job is too new, skip
+					continue;
+				}
+
+				// Check if file exists and recover
+				if (!job.inputKey) {
+					console.log(`[Cron] Job ${jobId} has no inputKey, marking as failed`);
+					await redis.hset(key, {
+						status: "failed",
+						error: "Upload never completed (no input key)",
+						completedAt: String(now),
+					});
+					failedCount++;
+					continue;
+				}
+
+				// Attempt recovery
+				const recoveryEnv: RecoveryEnv = {
+					...env,
+					INPUT_BUCKET: env.INPUT_BUCKET,
+				};
+
+				const recovered = await recoverUploadingJob(redis, recoveryEnv, jobId, job.inputKey);
+
+				if (recovered) {
+					recoveredCount++;
+				} else {
+					// File doesn't exist - check if job is very old (presumed failed upload)
+					const veryOldThreshold = recoveryThresholdMs * 2; // 2x the recovery threshold
+					if (jobAge > veryOldThreshold) {
+						console.log(`[Cron] Job ${jobId} is very old (${Math.round(jobAge / 1000)}s) and file not found, marking as failed`);
+						await redis.hset(key, {
+							status: "failed",
+							error: "Upload never completed (file not found after extended wait)",
+							completedAt: String(now),
+						});
+						failedCount++;
+					}
+				}
+			}
+
+			if (checkedCount >= maxChecks) break;
+		} while (cursor !== 0 && cursor !== "0");
+
+		if (checkedCount > 0) {
+			console.log(
+				`[Cron] Checked ${checkedCount} jobs, recovered ${recoveredCount} stuck uploading jobs, failed ${failedCount} old jobs`,
+			);
+		}
+	} catch (error) {
+		// SCAN might not be available or might fail - log and continue
+		console.log(`[Cron] Could not scan for uploading jobs (this is okay): ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
