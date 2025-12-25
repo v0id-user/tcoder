@@ -1,8 +1,8 @@
-version: '3.8'
+version: '3.9'
 
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: tcoder-redis
     ports:
       - "6379:6379"
