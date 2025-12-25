@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: tcoder-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - tcoder-network
+
+  redis-rest-api:
+    image: qmcgaw/redis-http-api:latest
+    container_name: tcoder-redis-rest-api
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - HTTP_API_PORT=8080
+      - HTTP_API_USERNAME=
+      - HTTP_API_PASSWORD=
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tcoder-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  fly-worker:
+    build:
+      context: ./fly
+      dockerfile: Dockerfile
+    container_name: tcoder-fly-worker
+    environment:
+      - UPSTASH_REDIS_REST_URL=http://redis-rest-api:8080
+      - UPSTASH_REDIS_REST_TOKEN=
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME:-}
+      - R2_ENDPOINT=${R2_ENDPOINT:-}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://host.docker.internal:8787/webhooks/job-complete}
+    depends_on:
+      redis-rest-api:
+        condition: service_healthy
+    networks:
+      - tcoder-network
+    # Don't start automatically - will be started manually for testing
+    profiles:
+      - worker
+
+volumes:
+  redis-data:
+
+networks:
+  tcoder-network:
+    driver: bridge
+

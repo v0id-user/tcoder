@@ -4,7 +4,12 @@
 	"private": true,
 	"workspaces": ["fly"],
 	"scripts": {
-		"dev": "wrangler dev",
+		"dev": "bun run scripts/dev-runner.ts",
+		"dev:cf": "bun run scripts/cf-dev-runner.ts",
+		"dev:docker": "docker-compose up",
+		"docker:build": "docker-compose build fly-worker",
+		"docker:up": "docker-compose up -d",
+		"docker:down": "docker-compose down",
 		"deploy": "wrangler deploy",
 		"start": "wrangler dev",
 		"test": "vitest",
