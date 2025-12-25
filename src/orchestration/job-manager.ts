@@ -6,12 +6,12 @@
  */
 
 import { Effect } from "effect";
-import type { Redis } from "@upstash/redis/cloudflare";
 import { RedisService, redisEffect, type RedisError } from "../redis/client";
 import {
 	RedisKeys,
 	RWOS_CONFIG,
 	type JobData,
+	type JobOutput,
 	serializeJobData,
 	deserializeJobData,
 } from "../redis/schema";
@@ -33,19 +33,26 @@ export type JobManagerError =
  * Enqueue a new job. Adds to pending queue and stores job metadata.
  */
 export const enqueueJob = (
-	job: Omit<JobData, "status" | "queuedAt" | "retries">
+	job: Omit<JobData, "status" | "timestamps" | "retries"> & {
+		timestamps?: Partial<JobData["timestamps"]>;
+	}
 ): Effect.Effect<JobData, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
+		const now = Date.now();
 
 		const fullJob: JobData = {
 			...job,
 			status: "pending",
-			queuedAt: Date.now(),
+			timestamps: {
+				createdAt: job.timestamps?.createdAt || now,
+				queuedAt: now,
+				...job.timestamps,
+			},
 			retries: 0,
 		};
 
-		const score = fullJob.queuedAt;
+		const score = now;
 		const serialized = serializeJobData(fullJob);
 
 		yield* Effect.tryPromise({
@@ -94,6 +101,8 @@ export const popJob = (
 				? (popped[0] as { member: string }).member
 				: (popped[0] as string);
 
+		const now = Date.now();
+
 		const jobData = yield* Effect.tryPromise({
 			try: async () => {
 				const pipe = client.pipeline();
@@ -101,7 +110,7 @@ export const popJob = (
 				pipe.hset(RedisKeys.jobStatus(jobId), {
 					status: "running",
 					machineId,
-					startedAt: String(Date.now()),
+					startedAt: String(now),
 				});
 				pipe.hset(RedisKeys.jobsActive, { [jobId]: machineId });
 				const results = await pipe.exec();
@@ -125,7 +134,15 @@ export const popJob = (
 			});
 		}
 
-		return { ...job, status: "running" as const, machineId };
+		return {
+			...job,
+			status: "running" as const,
+			machineId,
+			timestamps: {
+				...job.timestamps,
+				startedAt: now,
+			},
+		};
 	});
 
 /**
@@ -133,14 +150,14 @@ export const popJob = (
  */
 export const completeJob = (
 	jobId: string,
-	result?: { outputs?: string[]; duration?: number }
+	result?: { outputs?: JobOutput[]; duration?: number }
 ): Effect.Effect<void, RedisError, RedisService> =>
 	redisEffect(async (client) => {
 		const pipe = client.pipeline();
 		pipe.hset(RedisKeys.jobStatus(jobId), {
 			status: "completed",
 			completedAt: String(Date.now()),
-			...(result?.outputs && { outputs: result.outputs.join(",") }),
+			...(result?.outputs && { outputs: JSON.stringify(result.outputs) }),
 			...(result?.duration && { duration: String(result.duration) }),
 		});
 		pipe.hdel(RedisKeys.jobsActive, jobId);

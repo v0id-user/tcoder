@@ -3,6 +3,7 @@
 	"name": "tcoder",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-12-24",
+	"compatibility_flags": ["nodejs_compat"],
 	"observability": {
 		"enabled": true
 	},
@@ -10,6 +11,35 @@
 	// Cron trigger for stale job recovery (every minute)
 	"triggers": {
 		"crons": ["* * * * *"]
+	},
+
+	// R2 bucket bindings
+	"r2_buckets": [
+		{
+			"binding": "INPUT_BUCKET",
+			"bucket_name": "tcoder-input"
+		},
+		{
+			"binding": "OUTPUT_BUCKET",
+			"bucket_name": "tcoder-output"
+		}
+	],
+
+	// Queue bindings for R2 event notifications
+	"queues": {
+		"producers": [
+			{
+				"binding": "TRANSCODE_QUEUE",
+				"queue": "tcoder-events"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "tcoder-events",
+				"max_batch_size": 10,
+				"max_batch_timeout": 5
+			}
+		]
 	}
 
 	// Environment variables (set via wrangler secret)
@@ -19,4 +49,5 @@
 	// FLY_APP_NAME - Fly app name (fly-tcoder-ffmpeg-worker-31657fa)
 	// FLY_REGION - Fly region (fra)
 	// WEBHOOK_BASE_URL - Base URL for webhooks
+	// R2_PUBLIC_URL - Public URL for R2 bucket (optional, for presigned URLs)
 }

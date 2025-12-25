@@ -2,10 +2,15 @@
  * RWOS - Redis Worker Orchestration System
  *
  * Cloudflare Worker control plane for FFmpeg transcoding jobs.
+ * Handles:
+ * - API routes for job submission and status
+ * - R2 event notifications (queue consumer)
+ * - Scheduled stale job recovery (cron)
  */
 
 import { Hono } from "hono";
 import { createRoutes, createWebhookRoutes } from "./api/routes";
+import { handleR2Events, type R2EventNotification, type MessageBatch } from "./r2/events";
 
 const app = new Hono();
 
@@ -19,13 +24,24 @@ app.route("/api", createRoutes());
 app.route("/", createWebhookRoutes());
 
 export default {
-	fetch: app.fetch,
+	fetch: app.fetch as ExportedHandler<Env>["fetch"],
 
-	// Scheduled handler for stale job recovery
+	/**
+	 * Queue handler for R2 event notifications.
+	 * Triggered when objects are uploaded to the input bucket.
+	 */
+	async queue(batch: MessageBatch<R2EventNotification>, env: Env, ctx: ExecutionContext) {
+		ctx.waitUntil(handleR2Events(batch, env));
+	},
+
+	/**
+	 * Scheduled handler for stale job recovery.
+	 * Runs every minute to detect dead workers and requeue their jobs.
+	 */
 	async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
 		ctx.waitUntil(handleScheduled(env));
 	},
-} satisfies ExportedHandler<Env>;
+};
 
 // =============================================================================
 // Cron Handler - Stale Job Recovery
@@ -128,12 +144,25 @@ async function handleScheduled(env: Env) {
 // =============================================================================
 
 interface Env {
+	// R2 bindings
+	INPUT_BUCKET: R2Bucket;
+	OUTPUT_BUCKET: R2Bucket;
+	// Queue binding
+	TRANSCODE_QUEUE: Queue<R2EventNotification>;
+	// Redis credentials
 	UPSTASH_REDIS_REST_URL: string;
 	UPSTASH_REDIS_REST_TOKEN: string;
+	// Fly config
 	FLY_API_TOKEN: string;
 	FLY_APP_NAME: string;
 	FLY_REGION: string;
 	WEBHOOK_BASE_URL: string;
+	// R2 credentials for presigned URLs
+	R2_ACCOUNT_ID: string;
+	R2_ACCESS_KEY_ID: string;
+	R2_SECRET_ACCESS_KEY: string;
+	R2_INPUT_BUCKET_NAME: string;
+	R2_OUTPUT_BUCKET_NAME: string;
 }
 
 interface ScheduledEvent {
@@ -148,5 +177,6 @@ interface ExecutionContext {
 
 interface ExportedHandler<E> {
 	fetch: (request: Request, env: E, ctx: ExecutionContext) => Response | Promise<Response>;
+	queue?: (batch: MessageBatch<R2EventNotification>, env: E, ctx: ExecutionContext) => void | Promise<void>;
 	scheduled?: (event: ScheduledEvent, env: E, ctx: ExecutionContext) => void | Promise<void>;
 }

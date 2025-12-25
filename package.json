@@ -11,14 +11,11 @@
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types",
-
 		"fly:first-launch": "cd fly && bun run first-launch",
 		"fly:deploy": "cd fly && bun run deploy",
 		"fly:logs": "cd fly && bun run logs",
-
 		"fly:secrets:set": "cd fly && fly secrets set",
 		"fly:secrets:list": "cd fly && fly secrets list",
-
 		"secrets:set": "wrangler secret put",
 		"secrets:list": "wrangler secret list",
 		"secrets:setup": "echo 'Run: wrangler secret put UPSTASH_REDIS_REST_URL && wrangler secret put UPSTASH_REDIS_REST_TOKEN && wrangler secret put FLY_API_TOKEN'"
@@ -30,6 +27,8 @@
 		"wrangler": "^4.56.0"
 	},
 	"dependencies": {
+		"@aws-sdk/client-s3": "^3.958.0",
+		"@aws-sdk/s3-request-presigner": "^3.958.0",
 		"@hono/zod-validator": "^0.5.0",
 		"@upstash/redis": "^1.35.8",
 		"effect": "^3.19.13",

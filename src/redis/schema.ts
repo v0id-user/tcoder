@@ -36,20 +36,47 @@ export const RedisKeys = {
 // Job Types
 // =============================================================================
 
-export type JobStatus = "pending" | "running" | "completed" | "failed";
+/**
+ * Job status flow:
+ * uploading -> queued -> pending -> running -> completed
+ *                                           -> failed
+ */
+export type JobStatus =
+	| "uploading" // Presigned URL generated, waiting for upload
+	| "queued" // Upload complete, waiting to be picked up
+	| "pending" // In job queue, waiting for worker
+	| "running" // Worker processing
+	| "completed" // Done, outputs available
+	| "failed"; // Error occurred
+
+export interface JobTimestamps {
+	readonly createdAt: number; // When job was created (presigned URL generated)
+	readonly uploadedAt?: number; // When upload completed (R2 event received)
+	readonly queuedAt?: number; // When added to job queue
+	readonly startedAt?: number; // When worker started processing
+	readonly completedAt?: number; // When processing finished
+}
+
+export interface JobOutput {
+	readonly quality: string;
+	readonly url: string;
+	readonly size?: number;
+}
 
 export interface JobData {
 	readonly jobId: string;
 	readonly status: JobStatus;
 	readonly machineId?: string;
-	readonly inputUrl: string;
-	readonly outputUrl: string;
+	readonly inputKey: string; // R2 key for input file
+	readonly inputUrl?: string; // Full URL (set after upload)
+	readonly outputUrl: string; // Base output path
 	readonly preset: string;
 	readonly webhookUrl: string;
 	readonly outputQualities?: string[];
-	readonly queuedAt: number; // Unix timestamp ms
-	readonly startedAt?: number;
-	readonly completedAt?: number;
+	readonly outputs?: JobOutput[]; // Completed output files
+	readonly filename?: string; // Original filename
+	readonly contentType?: string;
+	readonly timestamps: JobTimestamps;
 	readonly error?: string;
 	readonly retries: number;
 	readonly r2Config?: {
@@ -115,6 +142,9 @@ export const RWOS_CONFIG = {
 
 	/** Maximum backoff delay (10 seconds) */
 	BACKOFF_MAX_MS: 10_000,
+
+	/** Presigned URL expiry (1 hour) */
+	PRESIGNED_URL_EXPIRY_SECONDS: 3600,
 } as const;
 
 // =============================================================================
@@ -125,16 +155,31 @@ export const serializeJobData = (job: JobData): Record<string, string> => ({
 	jobId: job.jobId,
 	status: job.status,
 	...(job.machineId && { machineId: job.machineId }),
-	inputUrl: job.inputUrl,
+	inputKey: job.inputKey,
+	...(job.inputUrl && { inputUrl: job.inputUrl }),
 	outputUrl: job.outputUrl,
 	preset: job.preset,
 	webhookUrl: job.webhookUrl,
 	...(job.outputQualities && {
 		outputQualities: job.outputQualities.join(","),
 	}),
-	queuedAt: String(job.queuedAt),
-	...(job.startedAt && { startedAt: String(job.startedAt) }),
-	...(job.completedAt && { completedAt: String(job.completedAt) }),
+	...(job.outputs && { outputs: JSON.stringify(job.outputs) }),
+	...(job.filename && { filename: job.filename }),
+	...(job.contentType && { contentType: job.contentType }),
+	// Timestamps
+	createdAt: String(job.timestamps.createdAt),
+	...(job.timestamps.uploadedAt && {
+		uploadedAt: String(job.timestamps.uploadedAt),
+	}),
+	...(job.timestamps.queuedAt && {
+		queuedAt: String(job.timestamps.queuedAt),
+	}),
+	...(job.timestamps.startedAt && {
+		startedAt: String(job.timestamps.startedAt),
+	}),
+	...(job.timestamps.completedAt && {
+		completedAt: String(job.timestamps.completedAt),
+	}),
 	...(job.error && { error: job.error }),
 	retries: String(job.retries),
 	...(job.r2Config && { r2Config: JSON.stringify(job.r2Config) }),
@@ -143,24 +188,32 @@ export const serializeJobData = (job: JobData): Record<string, string> => ({
 export const deserializeJobData = (
 	data: Record<string, string | null>
 ): JobData | null => {
-	if (!data.jobId || !data.inputUrl || !data.outputUrl) {
+	if (!data.jobId) {
 		return null;
 	}
 
 	return {
 		jobId: data.jobId,
-		status: (data.status as JobStatus) || "pending",
+		status: (data.status as JobStatus) || "uploading",
 		machineId: data.machineId || undefined,
-		inputUrl: data.inputUrl,
-		outputUrl: data.outputUrl,
+		inputKey: data.inputKey || "",
+		inputUrl: data.inputUrl || undefined,
+		outputUrl: data.outputUrl || "",
 		preset: data.preset || "default",
 		webhookUrl: data.webhookUrl || "",
 		outputQualities: data.outputQualities
 			? data.outputQualities.split(",")
 			: undefined,
-		queuedAt: Number(data.queuedAt) || Date.now(),
-		startedAt: data.startedAt ? Number(data.startedAt) : undefined,
-		completedAt: data.completedAt ? Number(data.completedAt) : undefined,
+		outputs: data.outputs ? JSON.parse(data.outputs) : undefined,
+		filename: data.filename || undefined,
+		contentType: data.contentType || undefined,
+		timestamps: {
+			createdAt: Number(data.createdAt) || Date.now(),
+			uploadedAt: data.uploadedAt ? Number(data.uploadedAt) : undefined,
+			queuedAt: data.queuedAt ? Number(data.queuedAt) : undefined,
+			startedAt: data.startedAt ? Number(data.startedAt) : undefined,
+			completedAt: data.completedAt ? Number(data.completedAt) : undefined,
+		},
 		error: data.error || undefined,
 		retries: Number(data.retries) || 0,
 		r2Config: data.r2Config ? JSON.parse(data.r2Config) : undefined,
@@ -194,4 +247,3 @@ export const deserializeWorkerLease = (
 		maxLifetimeMs: Number(data.maxLifetimeMs) || RWOS_CONFIG.MACHINE_TTL_MS,
 	};
 };
-
