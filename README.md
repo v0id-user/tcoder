@@ -310,27 +310,22 @@ tcoder/
 
 ## Local Development
 
-For local development with Docker Compose and Redis:
-
 ```bash
-# Start everything (Redis + Cloudflare Worker + scheduled trigger)
 bun run dev
-
-# Or run services separately:
-bun run dev:docker   # Start only Docker services (Redis + REST API)
-bun run dev:cf       # Start only Cloudflare Worker
-
-# Docker commands:
-bun run docker:build # Build Fly worker image
-bun run docker:up    # Start Docker services in background
-bun run docker:down  # Stop Docker services
 ```
 
-**Prerequisites:**
-- Docker and Docker Compose installed
-- Bun runtime
+Starts everything:
+- Fly-worker container (polls Redis for jobs)
+- Wrangler dev (API at localhost:8787)
+- Scheduled trigger (every 5 minutes)
 
-**See [LOCAL_DEV.md](./LOCAL_DEV.md) for detailed local development setup and troubleshooting.**
+**Prerequisites:**
+- Bun runtime
+- Docker
+- Upstash Redis account (free tier)
+- `.dev.vars` + `.env` configured
+
+**See [LOCAL_DEV.md](./LOCAL_DEV.md) for setup.**
 
 ## Documentation
 
@@ -342,11 +337,9 @@ bun run docker:down  # Stop Docker services
 ## Scripts
 
 ```bash
-bun run dev          # Local development (Docker + Cloudflare Worker)
-bun run dev:docker   # Start only Docker services
-bun run dev:cf       # Start only Cloudflare Worker
-bun run deploy       # Deploy Cloudflare Worker
-bun run fly:deploy   # Deploy Fly.io image
-bun run fly:logs     # View Fly.io logs
-bun run test         # Run tests
+bun run dev              # Start everything (fly-worker + wrangler + trigger)
+bun run deploy           # Deploy Cloudflare Worker
+bun run fly:deploy       # Deploy Fly.io image
+bun run fly:logs         # View Fly.io logs
+bun run test             # Run tests
 ```

@@ -4,137 +4,117 @@ This guide explains how to run the tcoder system locally for development and tes
 
 ## Prerequisites
 
-- Docker and Docker Compose
-- Bun runtime
-- Cloudflare account (for R2 and Workers)
+- [Bun](https://bun.sh) runtime
+- Docker (only needed for fly-worker testing)
+- Cloudflare account (for Workers, R2, Queues)
+- Upstash account (for Redis - free tier works fine)
 
 ## Quick Start
 
-### 1. Start Everything
+### 1. Set Up Hosted Services
+
+**Upstash Redis (free tier):**
+1. Go to [console.upstash.com](https://console.upstash.com)
+2. Create a new Redis database
+3. Copy the REST URL and REST Token
+
+**Cloudflare R2 & Queues:**
+- R2 buckets are configured in `wrangler.jsonc`
+- Queues are configured in `wrangler.jsonc`
+
+### 2. Create `.dev.vars` File
+
+Create a `.dev.vars` file in the root directory. Wrangler automatically loads this for local dev:
+
+```env
+# Upstash Redis (required)
+UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-token
+
+# Fly.io (required for spawning workers)
+FLY_API_TOKEN=your-fly-token
+FLY_APP_NAME=your-fly-app-name
+FLY_REGION=fra
+
+# Webhook URL (for job completion callbacks)
+WEBHOOK_BASE_URL=http://localhost:8787
+
+# R2 credentials (for presigned URLs)
+R2_ACCOUNT_ID=your-account-id
+R2_ACCESS_KEY_ID=your-access-key
+R2_SECRET_ACCESS_KEY=your-secret-key
+R2_INPUT_BUCKET_NAME=tcoder-input
+R2_OUTPUT_BUCKET_NAME=tcoder-output
+```
+
+### 3. Create `.env` File
+
+Create a `.env` file for the fly-worker container:
+
+```env
+# Upstash Redis
+UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-token
+
+# R2 Configuration (for downloading/uploading files)
+R2_ACCOUNT_ID=your-account-id
+R2_ACCESS_KEY_ID=your-access-key
+R2_SECRET_ACCESS_KEY=your-secret-key
+R2_BUCKET_NAME=tcoder-output
+R2_ENDPOINT=https://your-account-id.r2.cloudflarestorage.com
+```
+
+### 4. Run Everything
 
 ```bash
 bun run dev
 ```
 
-This will:
-- Start Redis and Redis REST API proxy via Docker Compose
-- Start Cloudflare Worker with `wrangler dev`
-- Start a concurrent job that triggers the scheduled endpoint every 5 minutes
+This starts:
+- **Fly-worker** - Docker container polling Redis for jobs
+- **Wrangler dev** - API at `http://localhost:8787`
+- **Scheduled trigger** - Hits cron endpoint every 5 minutes
 
-### 2. Run Services Separately
+All three run together. Press `Ctrl+C` to stop everything.
 
-**Start only Docker services:**
-```bash
-bun run dev:docker
-```
+## Environment Files
 
-**Start only Cloudflare Worker:**
-```bash
-bun run dev:cf
-```
+| File | Purpose | Used By |
+|------|---------|---------|
+| `.dev.vars` | Wrangler local dev secrets | `wrangler dev` |
+| `.env` | Fly-worker container env vars | `docker-compose` |
 
-**Build Docker image for Fly worker:**
-```bash
-bun run docker:build
-```
+## Scripts
 
-**Start Docker services in background:**
-```bash
-bun run docker:up
-```
+| Command | Description |
+|---------|-------------|
+| `bun run dev` | Start everything (fly-worker + wrangler + trigger) |
+| `bun run fly-worker:build` | Build fly-worker Docker image only |
+| `bun run fly-worker:run` | Run fly-worker container once |
 
-**Stop Docker services:**
-```bash
-bun run docker:down
-```
+## Architecture Notes
 
-## Architecture
+- **Cloudflare Worker**: Handles API, R2 events, job orchestration
+- **Upstash Redis**: Job queue, worker leases, state management
+- **Fly-worker**: One-shot FFmpeg container spawned on demand
 
-### Docker Compose Services
-
-- **redis**: Standard Redis instance on port 6379
-- **redis-rest-api**: REST API proxy for Redis (port 8080) - allows `@upstash/redis` to connect
-- **fly-worker**: Fly worker container (built from `fly/Dockerfile`) - started manually via profile
-
-### Local Redis Connection
-
-The Fly worker connects to Redis via REST API at `http://redis-rest-api:8080` when running in Docker, or `http://localhost:8080` when running locally.
-
-### Scheduled Endpoint Trigger
-
-The `scripts/trigger-scheduled.ts` script automatically hits the Cloudflare Worker's scheduled endpoint every 5 minutes to simulate cron triggers during local development.
-
-The endpoint URL is: `http://127.0.0.1:8787/cdn-cgi/handler/scheduled`
-
-## Environment Variables
-
-Create a `.env` file in the root directory with:
-
-```env
-# Redis (for local Docker Compose)
-UPSTASH_REDIS_REST_URL=http://localhost:8080
-UPSTASH_REDIS_REST_TOKEN=local-dev-token
-
-# R2 Configuration (for Fly worker)
-R2_ACCOUNT_ID=your-account-id
-R2_ACCESS_KEY_ID=your-access-key
-R2_SECRET_ACCESS_KEY=your-secret-key
-R2_BUCKET_NAME=your-bucket-name
-R2_ENDPOINT=
-
-# Webhook URL (for Fly worker to notify Cloudflare worker)
-WEBHOOK_URL=http://host.docker.internal:8787/webhooks/job-complete
-
-# Cloudflare Worker Port (default: 8787)
-PORT=8787
-```
-
-## Testing the Fly Worker Locally
-
-To test the Fly worker container:
-
-1. Build the image:
-   ```bash
-   bun run docker:build
-   ```
-
-2. Run the container with the worker profile:
-   ```bash
-   docker-compose --profile worker up fly-worker
-   ```
-
-3. Or run it directly:
-   ```bash
-   docker run --rm \
-     --env-file .env \
-     -e UPSTASH_REDIS_REST_URL=http://host.docker.internal:8080 \
-     tcoder-fly-worker
-   ```
+All services use hosted/managed infrastructure. No local databases or custom proxies needed.
 
 ## Troubleshooting
 
-### Redis Connection Issues
+### Worker Can't Connect to Redis
 
-If the worker can't connect to Redis:
-- Ensure Redis REST API is running: `docker-compose ps`
-- Check Redis REST API logs: `docker-compose logs redis-rest-api`
-- Verify the URL is correct: `http://localhost:8080` (local) or `http://redis-rest-api:8080` (Docker)
+- Verify your Upstash credentials in `.dev.vars`
+- Check that the REST URL starts with `https://`
 
 ### Scheduled Endpoint Not Triggering
 
-- Check that `scripts/trigger-scheduled.ts` is running (should see logs)
-- Verify wrangler is running on port 8787
-- Check the trigger script logs for errors
+- The trigger runs every 5 minutes after startup
+- First trigger happens 5 seconds after `bun run dev` starts
+- Check console for `[Trigger]` log messages
 
-### Port Conflicts
+### Fly-worker Can't Download from R2
 
-If port 8787 is already in use:
-- Set `PORT` environment variable to a different port
-- Update the trigger script's `PORT` constant if needed
-
-## Notes
-
-- The Redis REST API proxy (`upstash-redis-local`) provides a REST interface to standard Redis that mimics Upstash's REST API format, allowing `@upstash/redis` to work with local Redis
-- The Fly worker container is not started automatically - use the `worker` profile to start it
-- All scripts use Effect patterns for proper error handling and cleanup
-
+- Verify R2 credentials in `.env`
+- Ensure the bucket name matches
+- Check that R2 API token has read/write permissions

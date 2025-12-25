@@ -5,11 +5,8 @@
 	"workspaces": ["fly"],
 	"scripts": {
 		"dev": "bun run scripts/dev-runner.ts",
-		"dev:cf": "bun run scripts/cf-dev-runner.ts",
-		"dev:docker": "docker-compose up",
-		"docker:build": "docker-compose build fly-worker",
-		"docker:up": "docker-compose up -d",
-		"docker:down": "docker-compose down",
+		"fly-worker:build": "docker-compose build fly-worker",
+		"fly-worker:run": "docker-compose run --rm fly-worker",
 		"deploy": "wrangler deploy",
 		"start": "wrangler dev",
 		"test": "vitest",
