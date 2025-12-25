@@ -70,7 +70,7 @@ describe("Machine Pool", () => {
 			await mockRedis.sadd(RedisKeys.machinesStopped, machineId);
 
 			// Mock Fly API success
-			vi.mocked(flyClient.Machines_start).mockResolvedValue({} as never);
+			flyClient.Machines_start.mockResolvedValue({} as never);
 
 			await runWithMockRedis(startMachine(machineId, flyConfig), mockRedis);
 
@@ -116,7 +116,7 @@ describe("Machine Pool", () => {
 			// Mock Fly API error
 			const error = new Error("API Error") as Error & { response?: { status: number; data: string } };
 			error.response = { status: 500, data: "Internal Server Error" };
-			vi.mocked(flyClient.Machines_start).mockRejectedValue(error);
+			flyClient.Machines_start.mockRejectedValue(error);
 
 			const exit = await runWithMockRedisExit(startMachine(machineId, flyConfig), mockRedis);
 			const err = extractErrorFromExit(exit);
@@ -142,7 +142,7 @@ describe("Machine Pool", () => {
 			});
 
 			// Mock Fly API success
-			vi.mocked(flyClient.Machines_stop).mockResolvedValue({} as never);
+			flyClient.Machines_stop.mockResolvedValue({} as never);
 
 			await runWithMockRedis(stopMachine(machineId, flyConfig), mockRedis);
 
@@ -194,7 +194,7 @@ describe("Machine Pool", () => {
 			];
 
 			// Mock Fly API response
-			vi.mocked(flyClient.Machines_list).mockResolvedValue({
+			flyClient.Machines_list.mockResolvedValue({
 				data: { machines },
 			} as never);
 
@@ -225,7 +225,7 @@ describe("Machine Pool", () => {
 			});
 
 			// Mock Fly API returns empty list
-			vi.mocked(flyClient.Machines_list).mockResolvedValue({
+			flyClient.Machines_list.mockResolvedValue({
 				data: { machines: [] },
 			} as never);
 
