@@ -1,198 +1,312 @@
-# Fly.io Ephemeral FFmpeg Workers
+# Fly.io FFmpeg Workers with Redis Orchestration (RWOS)
 
-FFmpeg transcoding jobs that run on Fly.io Machines. Each job gets its own machine, runs once, then shuts down.
+TTL-bounded FFmpeg workers orchestrated via Redis. Each worker processes multiple jobs before exiting, minimizing Fly API calls and costs.
 
 ## Table of Contents
 
-- [What "Ephemeral" Means](#what-ephemeral-means)
+- [Architecture Overview](#architecture-overview)
 - [How It Works](#how-it-works)
-- [Why This Design](#why-this-design)
-- [Architecture](#architecture)
-- [Configuration Philosophy](#configuration-philosophy)
-- [Technology Stack](#technology-stack)
+- [Key Differences from Ephemeral Model](#key-differences-from-ephemeral-model)
+- [RWOS Components](#rwos-components)
+- [Worker Lifecycle](#worker-lifecycle)
+- [Admission Control](#admission-control)
+- [Redis Data Model](#redis-data-model)
 - [Deployment](#deployment)
-- [Cost Analysis](#cost-analysis)
 - [Environment Variables](#environment-variables)
-- [Presets](#presets)
+- [Cost Analysis](#cost-analysis)
 - [Monitoring](#monitoring)
 - [Debugging](#debugging)
-- [Important Notes](#important-notes)
-- [Integration with Main App](#integration-with-main-app)
-- [Budget Optimization](#budget-optimization)
 - [Security](#security)
 
-## What "Ephemeral" Means
+## Architecture Overview
 
-Ephemeral means temporary. These machines don't stay running.
+![Redis Worker Orchestration System](../design/architecture/RWOS/Redis%20Worker%20Orchestration%20System.png)
 
-**Normal server**: You start it, it runs 24/7, you pay for all that time even when it's idle.
+The system uses a **control plane / worker plane** split:
 
-**Ephemeral worker**: You create a machine when you need it, it does one job, then it stops. You only pay for the time it's actually working.
-
-Think of it like this:
-- Normal server = leaving a car running all day, paying for gas the whole time
-- Ephemeral worker = starting the car, driving somewhere, turning it off when you arrive
+| Layer | Component | Responsibility |
+|-------|-----------|----------------|
+| **Control Plane** | Cloudflare Worker | Job submission, admission control, machine spawning |
+| **State Store** | Upstash Redis | Job queue, worker leases, concurrency counters |
+| **Compute Plane** | Fly Machines | FFmpeg processing, R2 I/O, webhook notifications |
 
 ## How It Works
 
-1. You need to transcode a video
-2. Your code calls the Fly Machines API to create a new machine
-3. The machine starts up and downloads the input video from R2 storage
-4. FFmpeg transcodes the video (may generate multiple quality variants)
-5. Transcoding outputs are uploaded back to R2 storage
-6. A webhook notification is sent to your Worker API with completion status and output URLs
-7. Temporary files are cleaned up
-8. The process exits and the machine automatically stops
-9. You stop paying
+1. **Job Submission**: Client submits job → Cloudflare Worker enqueues to Redis
+2. **Admission Control**: Check rate limit (1 req/sec) + capacity (max 5 machines)
+3. **Worker Spawn**: If capacity available, create Fly Machine via API
+4. **Job Processing**: Worker acquires lease, pops jobs from queue, processes
+5. **Multi-Job Loop**: Worker processes 1-3 jobs until TTL (5 min) or max jobs
+6. **Graceful Exit**: Worker releases lease, decrements counter, exits
+7. **Failure Recovery**: Cron job detects dead workers, requeues stale jobs
 
-No machines running = no cost. Only pay when work is happening.
+```
+Job Submitted → Redis Queue → Worker Pops → FFmpeg → R2 Upload → Webhook → Next Job or Exit
+                    ↑                                                              ↓
+              Cron requeues                                              Lease released
+              stale jobs                                                 Counter decremented
+```
 
-## Why This Design
+## Key Differences from Ephemeral Model
 
-**Cost**: If you only process 10 videos per day, why pay for a server running 24/7? You only need compute for those 10 jobs.
+| Aspect | Old (Ephemeral) | New (RWOS) |
+|--------|-----------------|------------|
+| Jobs per machine | 1 | 1-3 (configurable) |
+| Machine lifetime | Job duration | TTL-bounded (5 min) |
+| Job discovery | Env vars at creation | Redis queue polling |
+| State management | None | Redis leases + counters |
+| Failure handling | None | Automatic requeue |
+| API calls | 1 per job | 1 per 3 jobs |
+| Observability | Fly logs only | Redis + logs |
 
-**Simplicity**: Each job is isolated. If one job crashes, it doesn't affect others. No shared state, no cleanup needed.
+## RWOS Components
 
-**Scaling**: Need to process 100 videos? Create 100 machines. They all run in parallel, then shut down when done.
+### Control Plane (Cloudflare Worker)
 
-## Architecture
+- **Hono API**: Job submission endpoints (`POST /api/jobs`)
+- **Admission Controller**: Rate limiting + capacity enforcement
+- **Machine Spawner**: Fly API calls with exponential backoff
+- **Cron Handler**: Stale job recovery (every minute)
 
-- **No long-running services** - machines created on-demand
-- **One job = one machine** - process exits → machine stops → billing stops
-- **Zero idle cost** - only pay for execution time
-- **Shared CPU** - minimize costs ($0.0000008/sec ≈ $2/month for ~70 jobs/day)
+### State Store (Upstash Redis)
 
-## Configuration Philosophy
+| Key | Type | Purpose |
+|-----|------|---------|
+| `jobs:pending` | ZSET | Job queue sorted by timestamp |
+| `jobs:active` | HASH | job_id → machine_id mapping |
+| `jobs:status:{id}` | HASH | Job metadata and status |
+| `workers:leases` | HASH | machine_id → expiry timestamp |
+| `counters:active_machines` | STRING | Current machine count |
+| `counters:rate_limit` | STRING | API rate limit (1s TTL) |
 
-### What We DON'T Use
+### Compute Plane (Fly Machine)
 
-- ❌ `[http_service]` - this is not a web server
-- ❌ `auto_start_machines` / `auto_stop_machines` - not applicable
-- ❌ `min_machines_running` - we want zero idle machines
-- ❌ Multiple CPUs - shared CPU is sufficient and cheapest
-- ❌ Static IPs or ports - no network listening
+- **Redis Client**: Polls job queue, updates status
+- **Lease Manager**: Acquires/extends/releases leases
+- **FFmpeg Pipeline**: Download → transcode → upload
+- **Webhook Client**: Notifies control plane on completion
 
-### What We DO Use
+## Worker Lifecycle
 
-- ✅ Minimal `fly.toml` (app name, region, dockerfile only)
-- ✅ `fly deploy --build-only` (build image once)
-- ✅ Fly Machines API (create machines programmatically)
-- ✅ Environment variables (pass job parameters)
-- ✅ Process exit = machine stop (automatic cleanup)
+![Worker Lifecycle](../design/architecture/RWOS/Worker%20Lifecycle.png)
 
-## Technology Stack
+**States:**
+1. **Starting**: Machine boots, connects to Redis
+2. **Active**: Polling queue for jobs
+3. **Processing**: Running FFmpeg pipeline
+4. **Draining**: TTL near or max jobs reached
+5. **Exiting**: Cleanup and exit
 
-- **Runtime**: Bun (fast JavaScript runtime)
-- **Effect System**: Effect-TS for typed error handling
-- **Process Execution**: Bun's native `$` API for shell commands
-- **Storage**: Cloudflare R2 (S3-compatible) for input/output files
-- **Container**: Docker with FFmpeg + Bun
-- **Platform**: Fly.io Machines API
-- **Components**:
-  - R2 Client Service (`r2-client.ts`) - Handles download/upload operations
-  - Webhook Client Service (`webhook-client.ts`) - Sends completion notifications
+**Transitions:**
+- Active → Processing: Job popped from queue
+- Processing → Active: Job completed
+- Active → Draining: TTL < 60s OR jobs ≥ 3
+- Draining → Exiting: Current job done
+- Active → Exiting: No jobs + TTL expired
+
+## Admission Control
+
+![Admission Control Flow](../design/architecture/RWOS/Admission%20Control%20Flow.png)
+
+**Rate Limiting:**
+```
+INCR counters:rate_limit (TTL 1s)
+if count > 1: wait 1s, retry
+```
+
+**Capacity Check:**
+```
+GET counters:active_machines
+if count >= 5: job stays queued
+else: INCR counter, create machine
+```
+
+**Backoff on Fly API errors:**
+- 429 (rate limit): exponential backoff
+- 5xx: retry with backoff
+- Max 5 retries
+
+## Redis Data Model
+
+### Job Status Hash
+```
+jobs:status:{job_id}
+├── jobId: string
+├── status: pending | running | completed | failed
+├── machineId: string (when running)
+├── inputUrl: string
+├── outputUrl: string
+├── preset: string
+├── webhookUrl: string
+├── queuedAt: timestamp
+├── startedAt: timestamp
+├── completedAt: timestamp
+├── error: string (if failed)
+└── retries: number
+```
+
+### Worker Lease
+```
+workers:leases
+├── {machine_id}: expiry_timestamp
+└── ...
+```
 
 ## Deployment
 
-### 1. Initial Setup
+### 1. Set Fly Secrets
 
 ```bash
 cd fly
 
-# Authenticate
-fly auth login
+fly secrets set \
+  UPSTASH_REDIS_REST_URL="https://your-redis.upstash.io" \
+  UPSTASH_REDIS_REST_TOKEN="your-token" \
+  R2_ACCOUNT_ID="your-account-id" \
+  R2_ACCESS_KEY_ID="your-access-key" \
+  R2_SECRET_ACCESS_KEY="your-secret-key" \
+  R2_BUCKET_NAME="your-bucket"
+```
 
-# Deploy image (one-time, or when code changes)
+### 2. Deploy Image
+
+```bash
 bun run deploy
 ```
 
-This builds and registers the Docker image. **No machines are created yet.**
+### 3. Set Cloudflare Worker Secrets
 
-### 2. Trigger Jobs
+```bash
+cd ..
 
-Jobs are triggered via the Fly Machines API, not by running containers.
-
-```typescript
-import { executeTranscodeJob } from "./machines";
-import { Effect } from "effect";
-
-const job = {
-  jobId: crypto.randomUUID(),
-  inputUrl: "https://r2.example.com/inputs/video.mp4?signature=...", // R2 presigned URL
-  outputUrl: "https://r2.example.com/outputs/video.mp4",
-  preset: "web-optimized",
-  apiToken: process.env.FLY_API_TOKEN!,
-  // Required: Webhook for completion notifications (Phase 4 - Discoverability Phase)
-  webhookUrl: "https://api.example.com/webhooks/transcode-complete",
-  // Optional: Multiple quality outputs
-  outputQualities: ["480p", "720p", "1080p"],
-  // Optional: R2 config (if not using presigned URLs)
-  r2Config: {
-    accountId: process.env.R2_ACCOUNT_ID!,
-    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-    bucketName: process.env.R2_BUCKET_NAME!,
-  }
-};
-
-const program = executeTranscodeJob(job).pipe(
-  Effect.provide(
-    Layer.mergeAll(
-      // Add your Fly config layer here
-    )
-  )
-);
-
-Effect.runPromise(program);
+wrangler secret put UPSTASH_REDIS_REST_URL
+wrangler secret put UPSTASH_REDIS_REST_TOKEN
+wrangler secret put FLY_API_TOKEN
+wrangler secret put FLY_APP_NAME      # fly-tcoder-ffmpeg-worker-31657fa
+wrangler secret put FLY_REGION        # fra
+wrangler secret put WEBHOOK_BASE_URL  # https://your-worker.workers.dev
 ```
 
-### 3. Machine Lifecycle
+### 4. Deploy Worker
 
+```bash
+bun run deploy
 ```
-API Request → Machine Created → Download from R2 → FFmpeg Transcodes → Upload to R2 → Webhook Notification → Cleanup → Process Exits → Machine Stops → Billing Ends
-              ↑                                                                                                                                    ↓
-              Image from registry                                                                                                                  Auto-destroy
-```
-
-## Cost Analysis
-
-**Pricing**: Shared CPU = ~$0.0000008/sec/MB RAM
-
-**512MB machine**:
-- $0.0004096/second
-- $0.024576/minute
-- $1.47456/hour
-
-**Example load**:
-- 100 jobs/day
-- 2 minutes average per job
-- 200 minutes total/day
-- **Cost**: ~$5/day = ~$150/month
-
-**Budget-friendly load** (target ≤ $5/month):
-- ~11 minutes/day of compute
-- ~5 jobs/day at 2 min each
-- Or 3 jobs/day at 3 min each
 
 ## Environment Variables
 
-Each job receives:
+### Fly Machine (set via fly secrets)
 
-| Variable | Description | Required | Example |
-|----------|-------------|----------|---------|
-| `JOB_ID` | Unique job identifier | Yes | `550e8400-e29b-41d4-a716-446655440000` |
-| `INPUT_URL` | Source media URL (R2 presigned URL or direct URL) | Yes | `https://r2.example.com/video.mp4?signature=...` |
-| `OUTPUT_URL` | Base destination URL in R2 | Yes | `https://r2.example.com/outputs/video.mp4` |
-| `WEBHOOK_URL` | Worker API endpoint for completion notifications (Phase 4 - Discoverability Phase) | Yes | `https://api.example.com/webhooks/transcode-complete` |
-| `PRESET` | FFmpeg preset | No | `web-optimized`, `hls`, `hls-adaptive`, `default` |
-| `OUTPUT_QUALITIES` | Comma-separated quality list for multi-output | No | `480p,720p,1080p` |
-| `R2_ACCOUNT_ID` | Cloudflare R2 account ID (for direct bucket access) | No* | `abc123def456` |
-| `R2_ACCESS_KEY_ID` | R2 access key ID | No* | `your-access-key` |
-| `R2_SECRET_ACCESS_KEY` | R2 secret access key | No* | `your-secret-key` |
-| `R2_BUCKET_NAME` | R2 bucket name | No* | `video-storage` |
-| `R2_ENDPOINT` | Custom R2 endpoint URL | No | `https://abc123.r2.cloudflarestorage.com` |
+| Variable | Description |
+|----------|-------------|
+| `UPSTASH_REDIS_REST_URL` | Redis REST API URL |
+| `UPSTASH_REDIS_REST_TOKEN` | Redis auth token |
+| `R2_ACCOUNT_ID` | Cloudflare account ID |
+| `R2_ACCESS_KEY_ID` | R2 access key |
+| `R2_SECRET_ACCESS_KEY` | R2 secret key |
+| `R2_BUCKET_NAME` | R2 bucket name |
 
-\* Required only if using direct bucket access instead of presigned URLs
+### Cloudflare Worker (set via wrangler secret)
+
+| Variable | Description |
+|----------|-------------|
+| `UPSTASH_REDIS_REST_URL` | Redis REST API URL |
+| `UPSTASH_REDIS_REST_TOKEN` | Redis auth token |
+| `FLY_API_TOKEN` | Fly.io API token |
+| `FLY_APP_NAME` | Fly app name |
+| `FLY_REGION` | Fly region (e.g., fra) |
+| `WEBHOOK_BASE_URL` | Worker base URL for webhooks |
+
+## Cost Analysis
+
+**RWOS reduces costs by processing multiple jobs per machine:**
+
+| Metric | Ephemeral (1 job/machine) | RWOS (3 jobs/machine) |
+|--------|---------------------------|------------------------|
+| Machine creates/day | 100 | 34 |
+| Fly API calls/day | 100 | 34 |
+| Startup overhead | 100× | 34× |
+| Effective cost | 100% | ~70% |
+
+**Pricing (512MB shared CPU):**
+- ~$0.0004/second
+- ~$0.024/minute
+- 5 min TTL = ~$0.12/machine
+- 3 jobs/machine = ~$0.04/job
+
+**Budget targets:**
+- $5/month ≈ 125 jobs (at 3/machine, 5 min TTL)
+- $10/month ≈ 250 jobs
+
+## Monitoring
+
+### Check System Stats
+```bash
+curl https://your-worker.workers.dev/api/stats
+```
+
+Response:
+```json
+{
+  "machines": { "activeMachines": 2, "maxMachines": 5 },
+  "pendingJobs": 5,
+  "activeJobs": 2,
+  "activeJobIds": ["job-123", "job-456"]
+}
+```
+
+### Check Job Status
+```bash
+curl https://your-worker.workers.dev/api/jobs/{job_id}
+```
+
+### View Fly Logs
+```bash
+fly logs --app fly-tcoder-ffmpeg-worker-31657fa
+```
+
+### List Machines
+```bash
+fly machines list
+```
+
+## Debugging
+
+### Job Stuck in "pending"
+1. Check if workers exist: `fly machines list`
+2. Check capacity: `GET /api/stats`
+3. Check Redis queue: verify `jobs:pending` has entries
+4. Check for rate limiting in logs
+
+### Job Stuck in "running"
+1. Check worker logs: `fly logs`
+2. Check lease expiry in Redis
+3. Wait for cron to requeue (1 min interval)
+
+### Worker Not Processing
+1. Verify Redis credentials: check `fly secrets list`
+2. Check worker startup logs
+3. Verify job queue has entries
+
+### Force Cleanup
+```bash
+# Destroy all machines
+fly machines list --json | jq -r '.[].id' | xargs -I {} fly machine destroy {} --force
+
+# Reset Redis counters (via redis-cli or Upstash console)
+SET counters:active_machines 0
+DEL workers:leases
+```
+
+## Security
+
+- **Secrets**: Never commit credentials to git
+- **Fly Secrets**: Use `fly secrets set` for machine env vars
+- **Wrangler Secrets**: Use `wrangler secret put` for worker env vars
+- **Presigned URLs**: Prefer over storing R2 credentials in machines
+- **Webhook Auth**: Add authentication tokens to webhook endpoints
+- **Rate Limiting**: Built-in via Redis counters
+- **Max Machines**: Hard cap prevents runaway costs
 
 ## Presets
 
@@ -208,8 +322,7 @@ ffmpeg -i input.mp4 \
 ```bash
 ffmpeg -i input.mp4 \
   -c:v libx264 -preset fast -g 48 -sc_threshold 0 \
-  -c:a aac \
-  -hls_time 4 -hls_playlist_type vod \
+  -c:a aac -hls_time 4 -hls_playlist_type vod \
   output.m3u8
 ```
 
@@ -218,190 +331,21 @@ ffmpeg -i input.mp4 \
 ffmpeg -i input.mp4 -c copy output.mp4
 ```
 
-## Monitoring
+## Scripts
 
-### List all machines
 ```bash
-fly machines list
+# Deploy image
+bun run deploy
+
+# View logs
+bun run logs
+
+# Set secrets
+bun run secrets:set KEY=value
+
+# List machines
+bun run machines:list
+
+# Destroy all machines
+bun run machines:destroy-all
 ```
-
-### Check machine status
-```bash
-fly machine status <machine-id>
-```
-
-### View logs
-```bash
-fly logs --machine <machine-id>
-```
-
-### Destroy stuck machines
-```bash
-fly machine destroy <machine-id>
-```
-
-## Debugging
-
-If jobs aren't starting:
-
-1. **Check image is deployed**:
-   ```bash
-   fly releases
-   ```
-
-2. **Verify API token**:
-   ```bash
-   fly auth token
-   ```
-
-3. **Test machine creation manually**:
-   ```bash
-   fly machine run \
-     --env JOB_ID=test-123 \
-     --env INPUT_URL=https://example.com/input.mp4 \
-     --env OUTPUT_URL=/tmp/output.mp4 \
-     --env WEBHOOK_URL=https://api.example.com/webhooks/transcode-complete \
-     --env PRESET=default \
-     registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:latest
-   ```
-
-4. **Check worker logs**:
-   ```bash
-   fly logs --app fly-tcoder-ffmpeg-worker-31657fa
-   ```
-
-## Important Notes
-
-- **No running machines** = $0 cost when idle
-- **Shared CPU** is sufficient for FFmpeg (no need for dedicated)
-- **512MB RAM** handles most transcoding (increase if needed)
-- **`auto_destroy: true`** cleans up machines after exit
-- **`restart: "no"`** prevents retry loops on failure
-- **Process exit code** determines success (0 = success, non-zero = failure)
-
-## Integration with Main App
-
-Your Cloudflare Worker should:
-
-1. Receive transcode request
-2. Store job metadata in database
-3. Call `executeTranscodeJob()` with Fly config and webhook URL
-4. Receive webhook notification when transcoding completes
-5. Update job status with output URLs
-
-### Triggering a Job
-
-```typescript
-// In your Cloudflare Worker
-import { executeTranscodeJob } from "./machines";
-import { Effect } from "effect";
-
-app.post("/transcode", async (c) => {
-  const { inputUrl, outputUrl } = await c.req.json();
-  const jobId = crypto.randomUUID();
-
-  const job = {
-    jobId,
-    inputUrl, // R2 presigned URL
-    outputUrl, // Base R2 output URL
-    preset: "web-optimized",
-    apiToken: process.env.FLY_API_TOKEN!,
-    webhookUrl: `${c.env.WORKER_URL}/webhooks/transcode-complete`, // Required: Your webhook endpoint (Phase 4 - Discoverability Phase)
-    outputQualities: ["480p", "720p", "1080p"], // Optional: multiple qualities
-  };
-
-  // Trigger job (non-blocking)
-  const machine = await executeTranscodeJob(job)
-    .pipe(Effect.provide(flyConfigLayer))
-    .pipe(Effect.runPromise);
-
-  return c.json({ jobId, machineId: machine.id });
-});
-```
-
-### Receiving Webhook Notifications
-
-```typescript
-// Webhook endpoint in your Cloudflare Worker
-app.post("/webhooks/transcode-complete", async (c) => {
-  const payload = await c.req.json();
-
-  // payload structure:
-  // {
-  //   jobId: string,
-  //   status: "completed" | "failed",
-  //   inputUrl: string,
-  //   outputs: Array<{ quality: string, url: string, preset: string }>,
-  //   error?: string,
-  //   duration?: number
-  // }
-
-  if (payload.status === "completed") {
-    // Update database with output URLs
-    await updateJobStatus(payload.jobId, {
-      status: "completed",
-      outputs: payload.outputs,
-      duration: payload.duration,
-    });
-
-    // Notify client via WebSocket or push notification
-    await notifyClient(payload.jobId, payload.outputs);
-  } else {
-    // Handle failure
-    await updateJobStatus(payload.jobId, {
-      status: "failed",
-      error: payload.error,
-    });
-  }
-
-  return c.json({ ok: true });
-});
-```
-
-## Budget Optimization
-
-To stay under $5/month:
-
-1. **Limit concurrent jobs** to prevent cost spikes
-2. **Use shared CPU** (not dedicated)
-3. **Set memory to minimum** required (256-512MB)
-4. **Enable auto_destroy** to clean up immediately
-5. **Monitor costs** with `fly dashboard`
-6. **Consider queueing** for rate limiting
-
-## Security
-
-- **Never commit** `FLY_API_TOKEN` or R2 credentials to git
-- **Use secrets** for sensitive URLs and API keys
-- **Use presigned URLs** when possible instead of storing R2 credentials in machines
-- **Validate inputs** before creating machines
-- **Set timeouts** to prevent runaway costs
-- **Monitor anomalies** in machine creation rate
-- **Secure webhook endpoints** with authentication tokens
-- **Rotate R2 credentials** regularly if using direct bucket access
-
-## Pipeline Components
-
-The worker consists of several Effect-based services:
-
-### R2 Client (`r2-client.ts`)
-- Downloads input videos from R2 (presigned URLs or direct bucket access)
-- Uploads transcoded outputs to R2 with metadata
-- Handles errors with typed error channels
-- **TODO**: Replace mock implementations with actual R2 SDK (`@aws-sdk/client-s3`)
-
-### Webhook Client (`webhook-client.ts`)
-- Sends completion notifications to Worker API (required)
-- Includes job results, output URLs, and error information
-- Implements Phase 4 (Discoverability Phase) from architecture - enables client awareness of new URLs
-- **TODO**: Add retry logic with exponential backoff and timeout handling
-
-### Worker (`worker.ts`)
-- Orchestrates the complete pipeline:
-  1. Download input from R2
-  2. Execute FFmpeg transcoding
-  3. Upload outputs to R2
-  4. Send webhook notification
-  5. Cleanup temporary files
-- Supports multiple output qualities
-- Proper error handling and cleanup on failure

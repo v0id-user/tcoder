@@ -6,20 +6,22 @@
 		"fly"
 	],
 	"scripts": {
-		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
+		"deploy": "wrangler deploy",
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types",
+
 		"fly:first-launch": "cd fly && bun run first-launch",
 		"fly:deploy": "cd fly && bun run deploy",
-		"fly:start": "cd fly && bun run machines:start-all",
-		"fly:stop": "cd fly && bun run machines:stop-all",
-		"fly:build": "cd fly && bun run build:docker",
-		"fly:docker:build": "cd fly && bun run docker:build",
-		"fly:docker:push": "cd fly && bun run docker:push",
-		"fly:docker:deploy": "cd fly && bun run docker:deploy",
-		"fly:local:test": "cd fly && bun run local:test"
+		"fly:logs": "cd fly && bun run logs",
+
+		"fly:secrets:set": "cd fly && fly secrets set",
+		"fly:secrets:list": "cd fly && fly secrets list",
+
+		"secrets:set": "wrangler secret put",
+		"secrets:list": "wrangler secret list",
+		"secrets:setup": "echo 'Run: wrangler secret put UPSTASH_REDIS_REST_URL && wrangler secret put UPSTASH_REDIS_REST_TOKEN && wrangler secret put FLY_API_TOKEN'"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",
@@ -28,7 +30,10 @@
 		"wrangler": "^4.56.0"
 	},
 	"dependencies": {
+		"@hono/zod-validator": "^0.5.0",
+		"@upstash/redis": "^1.35.8",
 		"effect": "^3.19.13",
-		"hono": "^4.11.1"
+		"hono": "^4.11.1",
+		"zod": "^3.25.28"
 	}
 }

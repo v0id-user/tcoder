@@ -1,0 +1,55 @@
+@startuml RWOS Admission Control Flow
+!theme plain
+skinparam boxPadding 10
+skinparam participantPadding 8
+autonumber "<b>[0]"
+
+title Admission Control Flow - Rate Limiting & Capacity Management
+
+participant CF as "Cloudflare Worker\n(Control Plane)"
+database Redis as "Upstash Redis"
+participant Fly as "Fly Machines API"
+
+== Rate Limit Check ==
+CF -> Redis: INCR counters:rate_limit\n(TTL 1 second)
+Redis --> CF: count
+
+alt count > 1 (Rate Limited)
+    CF -> CF: Sleep 1 second
+    CF -> Redis: INCR counters:rate_limit
+    Redis --> CF: count = 1
+end
+
+== Capacity Check ==
+CF -> Redis: GET counters:active_machines
+Redis --> CF: current_count
+
+alt current_count >= MAX_MACHINES (5)
+    note right of CF: Capacity Full
+    CF --> CF: Return "queued" status\n(Job waits for existing workers)
+else current_count < MAX_MACHINES
+    note right of CF: Capacity Available
+
+    == Reserve Slot ==
+    CF -> Redis: INCR counters:active_machines
+    Redis --> CF: slot_number
+
+    == Create Machine ==
+    CF -> Fly: POST /apps/{app}/machines\n(with exponential backoff)
+
+    alt 429 or 5xx
+        CF -> CF: Backoff and retry
+        CF -> Fly: Retry create
+    end
+
+    Fly --> CF: { id: machine_id, state: "started" }
+
+    == Register Lease ==
+    CF -> Redis: HSET workers:leases\n{ machine_id: expiry_timestamp }
+    CF -> Redis: HSET workers:meta:{machine_id}\n{ startedAt, status: "active" }
+
+    CF --> CF: Return { job_id, machine_id }
+end
+
+@enduml
+

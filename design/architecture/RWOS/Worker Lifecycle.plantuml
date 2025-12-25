@@ -1,0 +1,70 @@
+@startuml RWOS Worker Lifecycle
+!theme plain
+skinparam stateFontSize 12
+
+title Worker Lifecycle - TTL-Bounded Multi-Job Processing
+
+[*] --> Starting : Machine Created\nvia Machines API
+
+state Starting {
+    Starting : Connect to Redis
+    Starting : Read env variables
+}
+
+Starting --> Active : Lease Acquired\n(HSET workers:leases)
+
+state Active {
+    Active : Polling job queue
+    Active : jobs_processed < MAX_JOBS
+    Active : elapsed < TTL
+}
+
+Active --> Processing : ZPOPMIN returns job
+
+state Processing {
+    Processing : Download from R2
+    Processing : FFmpeg transcode
+    Processing : Upload to R2
+    Processing : Update Redis status
+    Processing : Send webhook
+}
+
+Processing --> Active : Job Complete\njobs_processed++
+
+Active --> Draining : TTL < 60s OR\njobs >= MAX_JOBS
+
+state Draining {
+    Draining : No new jobs accepted
+    Draining : Finish current if any
+}
+
+Draining --> Processing : Current job in progress
+
+Processing --> Exiting : Job Complete +\nDraining = true
+
+Active --> Exiting : Queue empty +\nTTL expired
+
+state Exiting {
+    Exiting : Release lease (HDEL)
+    Exiting : DECR active_machines
+    Exiting : Cleanup temp files
+}
+
+Exiting --> [*] : process.exit(0)
+
+note right of Active
+  **Constants:**
+  TTL = 5 minutes
+  MAX_JOBS = 3
+  POLL_INTERVAL = 5s
+  DRAIN_BUFFER = 60s
+end note
+
+note right of Processing
+  **Job Status Updates:**
+  pending → running → completed/failed
+  All tracked in Redis HASH
+end note
+
+@enduml
+

@@ -1,0 +1,107 @@
+@startuml Event-Driven Serverless Transcoding Pipeline with RWOS
+!theme plain
+'--- Visual Styling ---
+skinparam boxPadding 10
+skinparam participantPadding 10
+autonumber "<b>[0]"
+
+'--- Actors and Components ---
+actor Client as "User Client"
+
+box "Cloudflare Ecosystem" #e3f2fd
+    participant Worker as "Worker API\n(Control Plane)"
+    database R2 as "R2 Storage"
+    database Redis as "Upstash Redis"
+end box
+
+box "Compute Infrastructure" #fff3e0
+    participant Fly as "Fly.io Machine\n(TTL-Bounded Worker)"
+end box
+
+box "Distribution" #f3e5f5
+    participant CDN as "Bunny CDN"
+end box
+
+'--- 1. Authorization Phase ---
+== 1. Authorization Phase ==
+Client -> Worker: Request Upload Permission
+activate Worker
+Worker -> R2: Generate Presigned PUT URL
+R2 --> Worker: Return Signed URL
+Worker --> Client: Forward Presigned URL
+deactivate Worker
+
+'--- 2. Ingestion Phase ---
+== 2. Ingestion Phase ==
+Client -> R2: Direct Upload (Raw Video)
+R2 -[#blue]> Worker: Event Notification (Object Created)
+
+'--- 3. Job Orchestration Phase (RWOS) ---
+== 3. Job Orchestration Phase ==
+activate Worker
+Worker -> Redis: ZADD jobs:pending (enqueue job)
+Worker -> Redis: INCR counters:rate_limit (check rate limit)
+alt Rate Limited
+    Redis --> Worker: count > 1
+    Worker -> Worker: Delay 1s, retry
+end
+Worker -> Redis: GET counters:active_machines
+alt Capacity Available
+    Worker -> Redis: INCR counters:active_machines
+    Worker -> Fly: Create Machine via Machines API
+    activate Fly
+    Fly --> Worker: machine_id
+    Worker -> Redis: HSET workers:leases {machine_id}
+else Capacity Full
+    Worker --> Worker: Job stays queued for existing workers
+end
+Worker --> Client: Return job_id + status
+deactivate Worker
+
+'--- 4. Processing Phase (Multi-Job Worker) ---
+== 4. Processing Phase ==
+Fly -> Redis: Acquire Lease (HSET workers:leases)
+loop Until TTL or Max Jobs
+    Fly -> Redis: ZPOPMIN jobs:pending (atomic pop)
+    alt Job Available
+        Fly -> Redis: HSET jobs:status (running)
+        Fly -> R2: Download Raw Video
+        Fly -> Fly: FFmpeg Transcode\n(480p, 720p, 1080p)
+        Fly -> R2: Upload Processed Qualities
+        Fly -> Redis: HSET jobs:status (completed)
+        Fly -> Worker: Webhook: Job Complete
+    else No Jobs + TTL Near
+        Fly -> Fly: Enter drain mode
+    end
+end
+Fly -> Redis: Release Lease + DECR counters
+deactivate Fly
+
+'--- 5. Discoverability Phase ---
+== 5. Discoverability Phase ==
+note over Worker, Client: Client becomes aware of the new URLs
+activate Worker
+Worker -> Worker: Update Video Status in DB
+Worker -->> Client: Push Notification / WebSocket (Video Ready)
+deactivate Worker
+
+'--- 6. Distribution Phase ---
+== 6. Distribution Phase ==
+Client -> CDN: Pull Video via New URL
+activate CDN
+alt Cache Miss
+    CDN -> R2: Origin Fetch (if not cached)
+    R2 --> CDN: Video Data
+end
+CDN --> Client: Stream Video
+deactivate CDN
+
+'--- 7. Failure Recovery (Cron) ---
+== 7. Failure Recovery (Cron) ==
+Worker -> Redis: Scan expired leases
+alt Stale Jobs Found
+    Worker -> Redis: Requeue jobs (ZADD + status update)
+    Worker -> Redis: Cleanup expired leases (HDEL)
+end
+
+@enduml

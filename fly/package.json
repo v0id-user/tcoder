@@ -1,26 +1,29 @@
 {
-  "name": "fly",
-  "private": true,
-  "scripts": {
-    "first-launch": "fly apps destroy fly-tcoder-ffmpeg-worker-31657fa --yes 2>/dev/null || true && fly apps create fly-tcoder-ffmpeg-worker-31657fa && fly deploy --build-only",
-    "deploy": "fly deploy --build-only",
-    "test:local": "docker build -t fly-ffmpeg-test . && docker run --rm -e JOB_ID=test-123 -e INPUT_URL=https://example.com/input.mp4 -e OUTPUT_URL=/tmp/output.mp4 -e PRESET=default fly-ffmpeg-test",
-    "machines:list": "fly machines list",
-    "machines:start-all": "fly machines list --json | jq -r '.[] | select(.state == \"stopped\" or .state == \"suspended\") | .id' | xargs -I {} fly machine start {}",
-    "machines:stop-all": "fly machines list --json | jq -r '.[] | select(.state == \"started\") | .id' | xargs -I {} fly machine stop {}",
-    "machines:destroy-all": "fly machines list --json | jq -r '.[].id' | xargs -I {} fly machine destroy {}",
-    "logs": "fly logs"
-  },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "axios": "^1.13.2",
-    "effect": "^3.19.13",
-    "hono": "^4.11.1",
-    "openapi-client-axios": "^7.8.0"
-  }
+	"name": "fly",
+	"private": true,
+	"scripts": {
+		"first-launch": "fly apps destroy fly-tcoder-ffmpeg-worker-31657fa --yes 2>/dev/null || true && fly apps create fly-tcoder-ffmpeg-worker-31657fa && fly deploy --build-only",
+		"deploy": "fly deploy --build-only",
+		"logs": "fly logs",
+
+		"secrets:set": "fly secrets set",
+		"secrets:list": "fly secrets list",
+		"secrets:setup": "echo 'Run: fly secrets set UPSTASH_REDIS_REST_URL=... UPSTASH_REDIS_REST_TOKEN=... R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... R2_BUCKET_NAME=...'",
+
+		"machines:list": "fly machines list",
+		"machines:destroy-all": "fly machines list --json | jq -r '.[].id' | xargs -I {} fly machine destroy {} --force",
+
+		"test:local": "docker build -t fly-ffmpeg-test . && docker run --rm --env-file ../.env fly-ffmpeg-test"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"@upstash/redis": "^1.35.8",
+		"effect": "^3.19.13",
+		"hono": "^4.11.1"
+	}
 }
