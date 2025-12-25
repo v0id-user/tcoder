@@ -12,13 +12,7 @@ import { Redis } from "@upstash/redis/cloudflare";
 import { Hono } from "hono";
 import { Effect } from "effect";
 import { createRoutes, createWebhookRoutes } from "./api/routes";
-import {
-	type MessageBatch,
-	type R2EventNotification,
-	type RecoveryEnv,
-	handleR2Events,
-	recoverUploadingJob,
-} from "./r2/events";
+import { type MessageBatch, type R2EventNotification, type RecoveryEnv, handleR2Events, recoverUploadingJob } from "./r2/events";
 import { RWOS_CONFIG, RedisKeys, deserializeJobData, deserializeMachinePoolEntry } from "./redis/schema";
 import { stopMachine } from "./orchestration/machine-pool";
 import { makeRedisLayer } from "./redis/client";
@@ -135,9 +129,7 @@ async function handleScheduled(env: Env) {
 		let stoppedCount = 0;
 		for (const machineId of machinesToStop) {
 			try {
-				await Effect.runPromise(
-					stopMachine(machineId, flyConfig).pipe(Effect.provide(redisLayer)),
-				);
+				await Effect.runPromise(stopMachine(machineId, flyConfig).pipe(Effect.provide(redisLayer)));
 				stoppedCount++;
 			} catch (e) {
 				console.error(`[Cron] Failed to stop machine ${machineId}:`, e);
@@ -166,8 +158,7 @@ async function recoverStuckUploadingJobs(env: Env) {
 	const now = Date.now();
 
 	// Calculate recovery threshold: presigned URL expiry + buffer
-	const recoveryThresholdMs =
-		(RWOS_CONFIG.PRESIGNED_URL_EXPIRY_SECONDS + RWOS_CONFIG.UPLOADING_RECOVERY_BUFFER_SECONDS) * 1000;
+	const recoveryThresholdMs = (RWOS_CONFIG.PRESIGNED_URL_EXPIRY_SECONDS + RWOS_CONFIG.UPLOADING_RECOVERY_BUFFER_SECONDS) * 1000;
 
 	console.log("[Cron] Checking for stuck uploading jobs...");
 
@@ -261,9 +252,7 @@ async function recoverStuckUploadingJobs(env: Env) {
 		} while (cursor !== 0 && cursor !== "0");
 
 		if (checkedCount > 0) {
-			console.log(
-				`[Cron] Checked ${checkedCount} jobs, recovered ${recoveredCount} stuck uploading jobs, failed ${failedCount} old jobs`,
-			);
+			console.log(`[Cron] Checked ${checkedCount} jobs, recovered ${recoveredCount} stuck uploading jobs, failed ${failedCount} old jobs`);
 		}
 	} catch (error) {
 		// SCAN might not be available or might fail - log and continue

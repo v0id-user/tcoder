@@ -205,12 +205,7 @@ export interface RecoveryEnv extends Env {
  * Recover a job stuck in "uploading" status.
  * Checks if file exists in R2 and transitions job to "pending" if found.
  */
-export async function recoverUploadingJob(
-	redis: RedisClient,
-	env: RecoveryEnv,
-	jobId: string,
-	inputKey: string,
-): Promise<boolean> {
+export async function recoverUploadingJob(redis: RedisClient, env: RecoveryEnv, jobId: string, inputKey: string): Promise<boolean> {
 	try {
 		// Check if file exists in R2
 		const object = await env.INPUT_BUCKET.head(inputKey);

@@ -62,11 +62,12 @@ const getR2Config = Effect.sync((): R2Config => {
 		process.exit(1);
 	}
 
+	// At this point, we know all required values are defined (we exit if not)
 	return {
-		accountId: accountId!,
-		accessKeyId: accessKeyId!,
-		secretAccessKey: secretAccessKey!,
-		bucketName: bucketName!,
+		accountId: accountId as string,
+		accessKeyId: accessKeyId as string,
+		secretAccessKey: secretAccessKey as string,
+		bucketName: bucketName as string,
 		endpoint,
 	};
 });

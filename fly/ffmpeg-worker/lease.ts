@@ -95,7 +95,7 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 			}),
 		});
 
-		yield* Console.log(`[Worker] Initialized in pool as running`);
+		yield* Console.log("[Worker] Initialized in pool as running");
 
 		return { startedAt };
 	});
@@ -103,10 +103,7 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 /**
  * Update machine state in pool (running when processing, idle when waiting).
  */
-export const updateMachineState = (
-	machineId: string,
-	state: "running" | "idle",
-): Effect.Effect<void, RedisError, RedisService> =>
+export const updateMachineState = (machineId: string, state: "running" | "idle"): Effect.Effect<void, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 		const now = Date.now();
@@ -194,7 +191,7 @@ export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError
 			}),
 		);
 
-		yield* Console.log(`[Worker] Cleaned up, marked as stopped in pool`);
+		yield* Console.log("[Worker] Cleaned up, marked as stopped in pool");
 	});
 
 /**
@@ -221,13 +218,13 @@ export const popJob = (machineId: string): Effect.Effect<string | null, RedisErr
 		const jobId = typeof popped[0] === "string" ? popped[0] : (popped[0] as { member: string }).member;
 
 		// Mark job as running
-			const pipe = client.pipeline();
-			pipe.hset(RedisKeys.jobStatus(jobId), {
-				status: "running",
-				machineId,
-				startedAt: String(Date.now()),
-			});
-			pipe.hset(RedisKeys.jobsActive, { [jobId]: machineId });
+		const pipe = client.pipeline();
+		pipe.hset(RedisKeys.jobStatus(jobId), {
+			status: "running",
+			machineId,
+			startedAt: String(Date.now()),
+		});
+		pipe.hset(RedisKeys.jobsActive, { [jobId]: machineId });
 
 		yield* Effect.tryPromise({
 			try: () => pipe.exec(),

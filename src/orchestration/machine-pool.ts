@@ -29,10 +29,7 @@ interface FlyConfig {
 // Fly API Helpers
 // =============================================================================
 
-const callFlyApi = <T>(
-	operation: (config: FlyConfig) => Promise<T>,
-	config: FlyConfig,
-): Effect.Effect<T, FlyApiError, never> =>
+const callFlyApi = <T>(operation: (config: FlyConfig) => Promise<T>, config: FlyConfig): Effect.Effect<T, FlyApiError, never> =>
 	Effect.tryPromise({
 		try: () => operation(config),
 		catch: (e) => {
@@ -66,31 +63,25 @@ const callFlyApi = <T>(
 /**
  * Start a stopped machine via Fly API.
  */
-export const startMachine = (
-	machineId: string,
-	config: FlyConfig,
-): Effect.Effect<void, FlyApiError, RedisService> =>
+export const startMachine = (machineId: string, config: FlyConfig): Effect.Effect<void, FlyApiError, RedisService> =>
 	Effect.gen(function* () {
 		yield* Console.log(`[MachinePool] Starting machine ${machineId}`);
 
 		// Call Fly API to start machine
-		yield* callFlyApi(
-			async (cfg) => {
-				await flyClient.Machines_start(
-					{
-						app_name: cfg.appName,
-						machine_id: machineId,
+		yield* callFlyApi(async (cfg) => {
+			await flyClient.Machines_start(
+				{
+					app_name: cfg.appName,
+					machine_id: machineId,
+				},
+				undefined,
+				{
+					headers: {
+						Authorization: `Bearer ${cfg.apiToken}`,
 					},
-					undefined,
-					{
-						headers: {
-							Authorization: `Bearer ${cfg.apiToken}`,
-						},
-					},
-				);
-			},
-			config,
-		);
+				},
+			);
+		}, config);
 
 		// Update pool state: remove from stopped set, update pool entry to running
 		const { client } = yield* RedisService;
@@ -140,31 +131,25 @@ export const startMachine = (
 /**
  * Stop a running machine via Fly API.
  */
-export const stopMachine = (
-	machineId: string,
-	config: FlyConfig,
-): Effect.Effect<void, FlyApiError, RedisService> =>
+export const stopMachine = (machineId: string, config: FlyConfig): Effect.Effect<void, FlyApiError, RedisService> =>
 	Effect.gen(function* () {
 		yield* Console.log(`[MachinePool] Stopping machine ${machineId}`);
 
 		// Call Fly API to stop machine
-		yield* callFlyApi(
-			async (cfg) => {
-				await flyClient.Machines_stop(
-					{
-						app_name: cfg.appName,
-						machine_id: machineId,
+		yield* callFlyApi(async (cfg) => {
+			await flyClient.Machines_stop(
+				{
+					app_name: cfg.appName,
+					machine_id: machineId,
+				},
+				undefined,
+				{
+					headers: {
+						Authorization: `Bearer ${cfg.apiToken}`,
 					},
-					undefined,
-					{
-						headers: {
-							Authorization: `Bearer ${cfg.apiToken}`,
-						},
-					},
-				);
-			},
-			config,
-		);
+				},
+			);
+		}, config);
 
 		// Update pool state: add to stopped set, update pool entry to stopped
 		const { client } = yield* RedisService;
@@ -220,23 +205,20 @@ export const syncMachinePool = (config: FlyConfig): Effect.Effect<void, FlyApiEr
 		yield* Console.log("[MachinePool] Syncing pool state with Fly API...");
 
 		// Get all machines from Fly API
-		const machines = yield* callFlyApi(
-			async (cfg) => {
-				const response = await flyClient.Machines_list(
-					{
-						app_name: cfg.appName,
+		const machines = yield* callFlyApi(async (cfg) => {
+			const response = await flyClient.Machines_list(
+				{
+					app_name: cfg.appName,
+				},
+				undefined,
+				{
+					headers: {
+						Authorization: `Bearer ${cfg.apiToken}`,
 					},
-					undefined,
-					{
-						headers: {
-							Authorization: `Bearer ${cfg.apiToken}`,
-						},
-					},
-				);
-				return (response.data as { machines?: Machine[] })?.machines || [];
-			},
-			config,
-		);
+				},
+			);
+			return (response.data as { machines?: Machine[] })?.machines || [];
+		}, config);
 
 		yield* Console.log(`[MachinePool] Found ${machines.length} machines in Fly`);
 
@@ -281,9 +263,7 @@ export const syncMachinePool = (config: FlyConfig): Effect.Effect<void, FlyApiEr
 		let updated = 0;
 
 		for (const [machineId, machine] of flyMachines.entries()) {
-			const existingEntry = poolEntries[machineId]
-				? deserializeMachinePoolEntry(machineId, poolEntries[machineId])
-				: null;
+			const existingEntry = poolEntries[machineId] ? deserializeMachinePoolEntry(machineId, poolEntries[machineId]) : null;
 
 			const createdAt = existingEntry?.createdAt || now;
 			const flyState = machine.state || "unknown";
@@ -384,10 +364,7 @@ export const addMachineToPool = (machineId: string): Effect.Effect<void, RedisEr
 /**
  * Update machine state in pool (running/idle).
  */
-export const updateMachineState = (
-	machineId: string,
-	state: "running" | "idle",
-): Effect.Effect<void, RedisError, RedisService> =>
+export const updateMachineState = (machineId: string, state: "running" | "idle"): Effect.Effect<void, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 		const now = Date.now();
@@ -420,4 +397,3 @@ export const updateMachineState = (
 			}),
 		);
 	});
-

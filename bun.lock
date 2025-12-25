@@ -16,10 +16,10 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
-        "@cloudflare/vitest-pool-workers": "^0.8.19",
+        "@cloudflare/vitest-pool-workers": "^0.8.71",
         "knip": "^5.50.0",
         "typescript": "^5.5.2",
-        "vitest": "~3.2.0",
+        "vitest": "^3.2.4",
         "wrangler": "^4.56.0",
       },
     },

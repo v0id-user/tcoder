@@ -40,7 +40,7 @@
 				"max_batch_timeout": 5
 			}
 		]
-	},
+	}
 
 	// Environment variables (set via wrangler secret)
 	// UPSTASH_REDIS_REST_URL - Upstash Redis REST URL

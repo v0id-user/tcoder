@@ -62,15 +62,11 @@ const createMachine = (config: SpawnConfig, machineRequest: CreateMachineRequest
 	Effect.gen(function* () {
 		const machine = yield* Effect.tryPromise({
 			try: () =>
-				flyClient.Machines_create(
-					{ app_name: config.flyAppName },
-					machineRequest,
-					{
-						headers: {
-							Authorization: `Bearer ${config.flyApiToken}`,
-						},
+				flyClient.Machines_create({ app_name: config.flyAppName }, machineRequest, {
+					headers: {
+						Authorization: `Bearer ${config.flyApiToken}`,
 					},
-				),
+				}),
 			catch: (e) => {
 				if (
 					e &&
@@ -131,11 +127,14 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 	Effect.gen(function* () {
 		// First, try to reuse a stopped machine
 		const stoppedMachineId = yield* popStoppedMachine().pipe(
-			Effect.mapError((err) => ({
-				_tag: "FlyApiError" as const,
-				status: 0,
-				body: err._tag === "CommandError" ? err.reason : "Redis error",
-			} as SpawnerError)),
+			Effect.mapError(
+				(err) =>
+					({
+						_tag: "FlyApiError" as const,
+						status: 0,
+						body: err._tag === "CommandError" ? err.reason : "Redis error",
+					}) as SpawnerError,
+			),
 		);
 
 		if (stoppedMachineId) {

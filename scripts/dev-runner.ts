@@ -46,21 +46,21 @@ const runBackground = (name: string, command: string, args: string[]) =>
 
 const runForeground = (command: string, args: string[]) =>
 	Effect.async<void, Error>((resume) => {
-			const proc = Bun.spawn({
-				cmd: [command, ...args],
+		const proc = Bun.spawn({
+			cmd: [command, ...args],
 			cwd: process.cwd(),
-				stdout: "inherit",
-				stderr: "inherit",
-			});
+			stdout: "inherit",
+			stderr: "inherit",
+		});
 		processes.push(proc);
 
-			proc.exited.then((code) => {
-				if (code === 0 || code === null) {
+		proc.exited.then((code) => {
+			if (code === 0 || code === null) {
 				resume(Effect.succeed(undefined));
-				} else {
+			} else {
 				resume(Effect.fail(new Error(`Process exited with code ${code}`)));
-				}
-			});
+			}
+		});
 	});
 
 const triggerScheduled = Effect.gen(function* () {
@@ -84,7 +84,7 @@ const scheduledTriggerLoop = Effect.gen(function* () {
 	// First trigger immediately, then repeat
 	yield* triggerScheduled;
 	yield* triggerScheduled.pipe(Effect.repeat(Schedule.spaced(`${INTERVAL_MINUTES} minutes`)));
-	});
+});
 
 const program = Effect.gen(function* () {
 	yield* Console.log("┌────────────────────────────────────────┐");
