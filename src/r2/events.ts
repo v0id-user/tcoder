@@ -132,11 +132,14 @@ export async function handleR2Events(
 	}
 }
 
+// Redis client type alias
+type RedisClient = ReturnType<typeof Redis.fromEnv>;
+
 /**
  * Create a new job from R2 event (for direct uploads without presigned URL)
  */
 async function createJobFromEvent(
-	redis: ReturnType<typeof import("@upstash/redis/cloudflare").Redis.fromEnv>,
+	redis: RedisClient,
 	env: Env,
 	jobId: string,
 	event: R2EventNotification
@@ -176,10 +179,10 @@ async function createJobFromEvent(
  * Update existing job from R2 event (for uploads via presigned URL)
  */
 async function updateJobFromEvent(
-	redis: ReturnType<typeof import("@upstash/redis/cloudflare").Redis.fromEnv>,
+	redis: RedisClient,
 	env: Env,
 	jobId: string,
-	existingData: Record<string, string>,
+	_existingData: Record<string, string>,
 	event: R2EventNotification
 ): Promise<void> {
 	const now = Date.now();
