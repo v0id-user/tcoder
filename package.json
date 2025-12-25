@@ -18,6 +18,8 @@
 		"check:fix": "biome check --write .",
 		"knip": "knip",
 		"knip:fix": "knip --fix",
+		"validate": "bun run format:check && bun run lint && bun run knip",
+		"fix:all": "bun run format:write && bun run lint:fix && bun run knip:fix",
 		"fly:first-launch": "cd fly && bun run first-launch",
 		"fly:deploy": "cd fly && bun run deploy",
 		"fly:logs": "cd fly && bun run logs",
