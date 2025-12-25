@@ -100,6 +100,8 @@ bun run fly:deploy
 
 ## API Endpoints
 
+> **📖 For complete API documentation with CURL examples, see [USAGE.md](./USAGE.md)**
+
 ### `POST /api/upload` - Request Upload URL
 
 ```bash
@@ -269,6 +271,7 @@ bun run docker:down  # Stop Docker services
 
 ## Documentation
 
+- [API Usage Guide](./USAGE.md) - Complete CURL examples and API reference
 - [Local Development](./LOCAL_DEV.md) - Local dev setup with Docker Compose
 - [Fly.io Workers](./fly/README.md) - RWOS worker details, cost analysis
 - [Architecture Diagrams](./design/architecture/RWOS/) - System design
