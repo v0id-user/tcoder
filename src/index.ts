@@ -10,6 +10,7 @@
 
 import { Redis } from "@upstash/redis/cloudflare";
 import { Hono } from "hono";
+import { Effect } from "effect";
 import { createRoutes, createWebhookRoutes } from "./api/routes";
 import {
 	type MessageBatch,
@@ -18,7 +19,9 @@ import {
 	handleR2Events,
 	recoverUploadingJob,
 } from "./r2/events";
-import { RWOS_CONFIG, RedisKeys, deserializeJobData } from "./redis/schema";
+import { RWOS_CONFIG, RedisKeys, deserializeJobData, deserializeMachinePoolEntry } from "./redis/schema";
+import { stopMachine } from "./orchestration/machine-pool";
+import { makeRedisLayer } from "./redis/client";
 
 const app = new Hono();
 
@@ -58,91 +61,66 @@ export default {
 async function handleScheduled(env: Env) {
 	const redis = Redis.fromEnv(env);
 
-	console.log("[Cron] Checking for stale jobs...");
+	console.log("[Cron] Checking for idle machines to stop...");
 
 	try {
-		// Get all worker leases
-		const leases = await redis.hgetall<Record<string, string>>("workers:leases");
-		if (!leases) {
-			console.log("[Cron] No active leases");
+		// Get all machines from pool
+		const poolEntries = await redis.hgetall<Record<string, string>>(RedisKeys.machinesPool);
+		if (!poolEntries || Object.keys(poolEntries).length === 0) {
+			console.log("[Cron] No machines in pool");
+			await recoverStuckUploadingJobs(env);
 			return;
 		}
 
 		const now = Date.now();
-		const expiredMachines: string[] = [];
+		const idleTimeout = RWOS_CONFIG.IDLE_TIMEOUT_MS;
+		const machinesToStop: string[] = [];
 
-		// Find expired leases
-		for (const [machineId, expiryStr] of Object.entries(leases)) {
-			const expiry = Number(expiryStr);
-			if (expiry < now) {
-				expiredMachines.push(machineId);
+		// Find idle machines that should be stopped
+		for (const [machineId, entryJson] of Object.entries(poolEntries)) {
+			const entry = deserializeMachinePoolEntry(machineId, entryJson);
+			if (!entry) continue;
+
+			// Check if machine is idle and has been idle for more than IDLE_TIMEOUT_MS
+			if (entry.state === "idle" && now - entry.lastActiveAt >= idleTimeout) {
+				machinesToStop.push(machineId);
 			}
 		}
 
-		if (expiredMachines.length === 0) {
-			console.log("[Cron] No expired leases");
+		if (machinesToStop.length === 0) {
+			console.log("[Cron] No idle machines to stop");
+			await recoverStuckUploadingJobs(env);
 			return;
 		}
 
-		console.log(`[Cron] Found ${expiredMachines.length} expired leases`);
+		console.log(`[Cron] Found ${machinesToStop.length} idle machines to stop`);
 
-		// Get active jobs assigned to expired machines
-		const activeJobs = await redis.hgetall<Record<string, string>>("jobs:active");
-		if (!activeJobs) return;
+		// Stop each idle machine using Effect
+		const redisLayer = makeRedisLayer({
+			UPSTASH_REDIS_REST_URL: env.UPSTASH_REDIS_REST_URL,
+			UPSTASH_REDIS_REST_TOKEN: env.UPSTASH_REDIS_REST_TOKEN,
+		});
 
-		const jobsToRequeue: string[] = [];
-		for (const [jobId, machineId] of Object.entries(activeJobs)) {
-			if (expiredMachines.includes(machineId)) {
-				jobsToRequeue.push(jobId);
+		const flyConfig = {
+			apiToken: env.FLY_API_TOKEN,
+			appName: env.FLY_APP_NAME,
+		};
+
+		let stoppedCount = 0;
+		for (const machineId of machinesToStop) {
+			try {
+				await Effect.runPromise(
+					stopMachine(machineId, flyConfig).pipe(Effect.provide(redisLayer)),
+				);
+				stoppedCount++;
+			} catch (e) {
+				console.error(`[Cron] Failed to stop machine ${machineId}:`, e);
 			}
 		}
 
-		if (jobsToRequeue.length === 0) {
-			// Just cleanup expired leases
-			await redis.hdel("workers:leases", ...expiredMachines);
-			console.log(`[Cron] Cleaned up ${expiredMachines.length} expired leases`);
-			return;
-		}
-
-		console.log(`[Cron] Requeuing ${jobsToRequeue.length} stale jobs`);
-
-		// Requeue jobs
-		const pipe = redis.pipeline();
-		for (const jobId of jobsToRequeue) {
-			// Get current retry count
-			const jobData = await redis.hgetall<Record<string, string>>(`jobs:status:${jobId}`);
-			const retries = Number(jobData?.retries || 0);
-
-			if (retries >= 3) {
-				// Max retries, mark as failed
-				pipe.hset(`jobs:status:${jobId}`, {
-					status: "failed",
-					error: "Max retries exceeded (worker died)",
-					completedAt: String(now),
-				});
-				pipe.hdel("jobs:active", jobId);
-			} else {
-				// Requeue
-				pipe.zadd("jobs:pending", { score: now, member: jobId });
-				pipe.hset(`jobs:status:${jobId}`, {
-					status: "pending",
-					retries: String(retries + 1),
-					machineId: "",
-				});
-				pipe.hdel("jobs:active", jobId);
-			}
-		}
-
-		// Cleanup expired leases and decrement counter
-		pipe.hdel("workers:leases", ...expiredMachines);
-		for (const machineId of expiredMachines) {
-			pipe.del(`workers:meta:${machineId}`);
-		}
-
-		await pipe.exec();
-		console.log(`[Cron] Requeued ${jobsToRequeue.length} jobs, cleaned ${expiredMachines.length} leases`);
+		console.log(`[Cron] Stopped ${stoppedCount}/${machinesToStop.length} idle machines`);
 	} catch (e) {
-		console.error("[Cron] Error:", e);
+		console.error("[Cron] Error stopping idle machines:", e);
 	}
 
 	// Recover stuck uploading jobs

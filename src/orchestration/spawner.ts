@@ -6,9 +6,12 @@
  */
 
 import { Console, Effect, Schedule } from "effect";
+import { flyClient } from "../../fly/fly-client";
+import type { CreateMachineRequest, Machine } from "../../fly/fly-machine-apis";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
 import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
 import { acquireMachineSlot, releaseMachineSlot } from "./admission";
+import { popStoppedMachine, startMachine, addMachineToPool } from "./machine-pool";
 
 // =============================================================================
 // Types
@@ -38,73 +41,58 @@ export type SpawnerError =
 // Fly Machines API
 // =============================================================================
 
-const FLY_API_BASE = "https://api.machines.dev/v1";
-
-interface MachineConfig {
-	name: string;
-	region: string;
-	config: {
-		image: string;
-		env: Record<string, string>;
-		guest: {
-			cpu_kind: string;
-			cpus: number;
-			memory_mb: number;
-		};
-		restart: {
-			policy: string;
-		};
-		auto_destroy: boolean;
-	};
-}
-
 /**
- * Create a Fly Machine via REST API with retry.
+ * Create a Fly Machine via typed API client.
  */
-const createMachine = (config: SpawnConfig, machineConfig: MachineConfig): Effect.Effect<SpawnResult, SpawnerError, never> =>
+const createMachine = (config: SpawnConfig, machineRequest: CreateMachineRequest): Effect.Effect<SpawnResult, SpawnerError, never> =>
 	Effect.gen(function* () {
-		const url = `${FLY_API_BASE}/apps/${config.flyAppName}/machines`;
-
-		const response = yield* Effect.tryPromise({
+		const machine = yield* Effect.tryPromise({
 			try: () =>
-				fetch(url, {
-					method: "POST",
-					headers: {
-						Authorization: `Bearer ${config.flyApiToken}`,
-						"Content-Type": "application/json",
+				flyClient.Machines_create(
+					{ app_name: config.flyAppName },
+					machineRequest,
+					{
+						headers: {
+							Authorization: `Bearer ${config.flyApiToken}`,
+						},
 					},
-					body: JSON.stringify(machineConfig),
-				}),
-			catch: (e) => ({
-				_tag: "FlyApiError" as const,
-				status: 0,
-				body: e instanceof Error ? e.message : String(e),
-			}),
+				),
+			catch: (e) => {
+				if (
+					e &&
+					typeof e === "object" &&
+					"response" in e &&
+					e.response &&
+					typeof e.response === "object" &&
+					"status" in e.response &&
+					"data" in e.response
+				) {
+					return {
+						_tag: "FlyApiError" as const,
+						status: e.response.status as number,
+						body: typeof e.response.data === "string" ? e.response.data : JSON.stringify(e.response.data),
+					} as SpawnerError;
+				}
+				return {
+					_tag: "FlyApiError" as const,
+					status: 0,
+					body: typeof e === "string" ? e : "Network error",
+				} as SpawnerError;
+			},
 		});
 
-		if (!response.ok) {
-			const body = yield* Effect.tryPromise({
-				try: () => response.text(),
-				catch: () => "Unknown error",
-			});
-
+		if (!machine.data?.id) {
 			return yield* Effect.fail({
 				_tag: "FlyApiError" as const,
-				status: response.status,
-				body: typeof body === "string" ? body : "Unknown error",
+				status: 0,
+				body: "Invalid machine response: missing id",
 			});
 		}
 
-		const data = yield* Effect.tryPromise({
-			try: () => response.json() as Promise<{ id: string; state: string }>,
-			catch: (e) => ({
-				_tag: "FlyApiError" as const,
-				status: 0,
-				body: e instanceof Error ? e.message : String(e),
-			}),
-		});
-
-		return { machineId: data.id, state: data.state };
+		return {
+			machineId: machine.data.id,
+			state: machine.data.state || "created",
+		};
 	});
 
 /**
@@ -122,11 +110,49 @@ const retrySchedule = Schedule.exponential(RWOS_CONFIG.BACKOFF_BASE_MS).pipe(
 
 /**
  * Spawn a new Fly Machine worker.
+ * First checks for stopped machines to reuse, then creates new if needed.
  * Handles admission control, retry with backoff, and env injection.
  */
 export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, SpawnerError, RedisService> =>
 	Effect.gen(function* () {
-		// Check admission (rate limit + capacity)
+		// First, try to reuse a stopped machine
+		const stoppedMachineId = yield* popStoppedMachine().pipe(
+			Effect.mapError((err) => ({
+				_tag: "FlyApiError" as const,
+				status: 0,
+				body: err._tag === "CommandError" ? err.reason : "Redis error",
+			} as SpawnerError)),
+		);
+
+		if (stoppedMachineId) {
+			yield* Console.log(`[Spawner] Reusing stopped machine ${stoppedMachineId}`);
+
+			// Start the stopped machine
+			yield* startMachine(stoppedMachineId, {
+				apiToken: config.flyApiToken,
+				appName: config.flyAppName,
+			}).pipe(
+				Effect.catchAll((err) =>
+					Effect.gen(function* () {
+						yield* Console.error(`[Spawner] Failed to start stopped machine ${stoppedMachineId}: ${err}`);
+						// Put it back in stopped set if start failed
+						yield* redisEffect((client) => client.sadd(RedisKeys.machinesStopped, stoppedMachineId));
+						return yield* Effect.fail({
+							_tag: "FlyApiError" as const,
+							status: err._tag === "HttpError" ? err.status : 0,
+							body: err._tag === "HttpError" ? err.body : "Failed to start machine",
+						} as SpawnerError);
+					}),
+				),
+			);
+
+			return {
+				machineId: stoppedMachineId,
+				state: "started",
+			} as SpawnResult;
+		}
+
+		// No stopped machines available, check admission and create new
 		const slot = yield* acquireMachineSlot();
 
 		if (!slot.acquired) {
@@ -136,10 +162,10 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 			});
 		}
 
-		yield* Console.log(`[Spawner] Acquired slot ${slot.slotNumber}`);
+		yield* Console.log(`[Spawner] Acquired slot ${slot.slotNumber}, creating new machine`);
 
-		// Build machine config with Redis credentials
-		const machineConfig: MachineConfig = {
+		// Build machine request with Redis credentials
+		const machineRequest: CreateMachineRequest = {
 			name: `ffmpeg-worker-${Date.now()}`,
 			region: config.flyRegion,
 			config: {
@@ -159,12 +185,12 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 				restart: {
 					policy: "no",
 				},
-				auto_destroy: true,
+				auto_destroy: false,
 			},
 		};
 
 		// Create machine with retry on rate limit/5xx
-		const result = yield* createMachine(config, machineConfig).pipe(
+		const result = yield* createMachine(config, machineRequest).pipe(
 			Effect.retry(retrySchedule),
 			Effect.catchAll((err) =>
 				Effect.gen(function* () {
@@ -177,25 +203,8 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 
 		yield* Console.log(`[Spawner] Created machine ${result.machineId}`);
 
-		// Register lease immediately (as per Admission Control diagram)
-		const now = Date.now();
-		const expiresAt = now + RWOS_CONFIG.MACHINE_TTL_MS + RWOS_CONFIG.LEASE_BUFFER_MS;
-
-		yield* redisEffect(async (client) => {
-			const pipe = client.pipeline();
-			pipe.hset(RedisKeys.workersLeases, {
-				[result.machineId]: String(expiresAt),
-			});
-			pipe.hset(RedisKeys.workerMeta(result.machineId), {
-				machineId: result.machineId,
-				startedAt: String(now),
-				jobsProcessed: "0",
-				status: "starting",
-			});
-			await pipe.exec();
-		});
-
-		yield* Console.log(`[Spawner] Registered lease for ${result.machineId}`);
+		// Add to machine pool
+		yield* addMachineToPool(result.machineId);
 
 		return result;
 	});

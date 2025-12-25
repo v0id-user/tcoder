@@ -7,7 +7,7 @@
 
 import { Effect } from "effect";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
-import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
+import { RWOS_CONFIG, RedisKeys, deserializeMachinePoolEntry } from "../redis/schema";
 
 // =============================================================================
 // Admission Error Types
@@ -63,12 +63,14 @@ export const waitForRateLimit = (): Effect.Effect<void, RedisError, RedisService
 
 /**
  * Check if we have capacity to create a new machine.
+ * Counts all machines in pool (running + stopped) vs MAX_MACHINES.
  */
 export const checkCapacity = (): Effect.Effect<{ allowed: boolean; currentMachines: number }, RedisError, RedisService> =>
 	Effect.gen(function* () {
-		const countStr = yield* redisEffect((client) => client.get<string>(RedisKeys.countersActiveMachines));
+		// Count machines in pool (running + stopped)
+		const poolEntries = yield* redisEffect((client) => client.hgetall<Record<string, string>>(RedisKeys.machinesPool));
 
-		const currentMachines = Number(countStr || 0);
+		const currentMachines = poolEntries ? Object.keys(poolEntries).length : 0;
 		const allowed = currentMachines < RWOS_CONFIG.MAX_MACHINES;
 
 		return { allowed, currentMachines };
@@ -107,18 +109,12 @@ export const releaseMachineSlot = (): Effect.Effect<number, RedisError, RedisSer
 	});
 
 /**
- * Full admission check: rate limit + capacity.
+ * Full admission check: capacity only (Fly handles rate limiting with 429s).
  * Returns true if a machine can be created.
  */
 export const canCreateMachine = (): Effect.Effect<{ allowed: boolean; reason?: string }, RedisError, RedisService> =>
 	Effect.gen(function* () {
-		// Check rate limit first
-		const rateOk = yield* checkRateLimit();
-		if (!rateOk) {
-			return { allowed: false, reason: "Rate limited (1 req/sec)" };
-		}
-
-		// Check capacity
+		// Check capacity (pool-based: running + stopped)
 		const { allowed, currentMachines } = yield* checkCapacity();
 		if (!allowed) {
 			return {
@@ -132,7 +128,7 @@ export const canCreateMachine = (): Effect.Effect<{ allowed: boolean; reason?: s
 
 /**
  * Attempt to acquire a machine slot with admission control.
- * Waits for rate limit, checks capacity, reserves slot if available.
+ * Checks capacity (pool-based), no rate limit waiting (Fly handles 429s).
  */
 export const acquireMachineSlot = (): Effect.Effect<
 	{ acquired: boolean; slotNumber?: number; reason?: string },
@@ -140,10 +136,7 @@ export const acquireMachineSlot = (): Effect.Effect<
 	RedisService
 > =>
 	Effect.gen(function* () {
-		// Wait for rate limit
-		yield* waitForRateLimit();
-
-		// Check capacity
+		// Check capacity (pool-based: running + stopped)
 		const { allowed, currentMachines } = yield* checkCapacity();
 		if (!allowed) {
 			return {
@@ -152,11 +145,13 @@ export const acquireMachineSlot = (): Effect.Effect<
 			};
 		}
 
-		// Reserve slot
+		// Reserve slot (increment counter for tracking)
 		const slotNumber = yield* reserveMachineSlot();
 
 		// Double-check we didn't exceed limit (race condition protection)
-		if (slotNumber > RWOS_CONFIG.MAX_MACHINES) {
+		// Note: This uses the counter, but actual capacity is pool-based
+		const { allowed: stillAllowed } = yield* checkCapacity();
+		if (!stillAllowed) {
 			yield* releaseMachineSlot();
 			return {
 				acquired: false,
@@ -169,13 +164,15 @@ export const acquireMachineSlot = (): Effect.Effect<
 
 /**
  * Get current admission stats for monitoring.
+ * Returns pool size (running + stopped) and max machines.
  */
 export const getAdmissionStats = (): Effect.Effect<{ activeMachines: number; maxMachines: number }, RedisError, RedisService> =>
 	Effect.gen(function* () {
-		const countStr = yield* redisEffect((client) => client.get<string>(RedisKeys.countersActiveMachines));
+		const poolEntries = yield* redisEffect((client) => client.hgetall<Record<string, string>>(RedisKeys.machinesPool));
+		const poolSize = poolEntries ? Object.keys(poolEntries).length : 0;
 
 		return {
-			activeMachines: Number(countStr || 0),
+			activeMachines: poolSize,
 			maxMachines: RWOS_CONFIG.MAX_MACHINES,
 		};
 	});

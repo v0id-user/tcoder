@@ -20,17 +20,13 @@ import { $ } from "bun";
 import { Console, Effect, Exit, Layer } from "effect";
 import {
 	LEASE_CONFIG,
-	type WorkerState,
 	completeJob,
-	extendLease,
 	failJob,
 	getJobData,
 	popJob,
-	releaseLease,
-	setDraining,
-	shouldDrain,
-	updateJobsProcessed,
-	verifyAndActivateLease,
+	cleanupWorker,
+	initializeWorker,
+	updateMachineState,
 } from "./lease";
 import { R2ClientService, extractR2Key, getTempFilePath } from "./r2-client";
 import { makeR2ClientLayer } from "./r2-client";
@@ -229,63 +225,42 @@ const processJob = (jobId: string) =>
 
 const workerLoop = Effect.gen(function* () {
 	const machineId = process.env.FLY_MACHINE_ID || `local-${Date.now()}`;
-	yield* Console.log(`🎬 Worker ${machineId} starting`);
-	yield* Console.log(`   TTL: ${LEASE_CONFIG.MACHINE_TTL_MS / 1000}s, Max jobs: ${LEASE_CONFIG.MAX_JOBS}`);
+	yield* Console.log(`🎬 Worker ${machineId} starting (indefinite polling)`);
 
-	// Verify and activate lease (registered by spawner, or create if local dev)
-	const lease = yield* verifyAndActivateLease(machineId);
+	// Initialize worker in pool
+	const { startedAt } = yield* initializeWorker(machineId);
 	let jobsProcessed = 0;
-	let draining = false;
-	const startTime = lease.startedAt;
 
 	try {
-		while (!draining) {
-			// Check if we should drain
-			const state: WorkerState = { machineId, startTime, jobsProcessed, draining };
-			if (shouldDrain(state)) {
-				yield* setDraining(machineId);
-				draining = true;
-				yield* Console.log(`[Worker] Entering drain mode after ${jobsProcessed} jobs`);
-				break;
-			}
-
+		// Poll indefinitely until stopped externally
+		while (true) {
 			// Pop job from queue
 			const jobId = yield* popJob(machineId);
 
 			if (!jobId) {
-				// No jobs available, wait and retry
-				const elapsed = Date.now() - startTime;
-				const remaining = LEASE_CONFIG.MACHINE_TTL_MS - elapsed;
-
-				if (remaining < LEASE_CONFIG.DRAIN_BUFFER_MS) {
-					// Not enough time left, exit
-					yield* Console.log("[Worker] No jobs and TTL near, exiting");
-					break;
-				}
-
+				// No jobs available, mark as idle and wait
+				yield* updateMachineState(machineId, "idle");
 				yield* Console.log(`[Worker] Queue empty, waiting ${LEASE_CONFIG.POLL_INTERVAL_MS / 1000}s...`);
 				yield* Effect.sleep(`${LEASE_CONFIG.POLL_INTERVAL_MS} millis`);
 				continue;
 			}
 
+			// Job found, mark as running
+			yield* updateMachineState(machineId, "running");
+
 			// Process job
 			yield* processJob(jobId);
 			jobsProcessed++;
 
-			// Update lease
-			yield* updateJobsProcessed(machineId, jobsProcessed);
-
-			// Extend lease if continuing
-			const remaining = LEASE_CONFIG.MACHINE_TTL_MS - (Date.now() - startTime);
-			if (remaining > LEASE_CONFIG.DRAIN_BUFFER_MS) {
-				yield* extendLease(machineId, Math.min(60_000, remaining));
-			}
+			// Update state after job (will be set to idle on next iteration if no job)
 		}
-
-		yield* Console.log(`\n🏁 Worker completed: ${jobsProcessed} jobs processed`);
+	} catch (e) {
+		yield* Console.error(`[Worker] Error in worker loop: ${e instanceof Error ? e.message : String(e)}`);
+		throw e;
 	} finally {
-		// Always release lease on exit
-		yield* releaseLease(machineId);
+		// Cleanup on exit
+		yield* cleanupWorker(machineId);
+		yield* Console.log(`\n🏁 Worker exiting: ${jobsProcessed} jobs processed`);
 	}
 });
 

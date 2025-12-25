@@ -19,11 +19,11 @@ export const RedisKeys = {
 	/** Job status hash - HASH with job metadata */
 	jobStatus: (jobId: string) => `jobs:status:${jobId}` as const,
 
-	/** Worker leases - HASH: machine_id -> expiry timestamp */
-	workersLeases: "workers:leases",
+	/** Machine pool - HASH: machine_id -> JSON {state, lastActiveAt, createdAt} */
+	machinesPool: "machines:pool",
 
-	/** Worker metadata - HASH with worker stats */
-	workerMeta: (machineId: string) => `workers:meta:${machineId}` as const,
+	/** Stopped machines - SET: machineIds available to start */
+	machinesStopped: "machines:stopped",
 
 	/** Active machine counter - STRING */
 	countersActiveMachines: "counters:active_machines",
@@ -88,21 +88,11 @@ export interface JobData {
 	};
 }
 
-export interface WorkerLease {
+export interface MachinePoolEntry {
 	readonly machineId: string;
-	readonly expiresAt: number; // Unix timestamp ms
-	readonly startedAt: number;
-	readonly jobsProcessed: number;
-	readonly maxJobs: number;
-	readonly maxLifetimeMs: number;
-}
-
-export interface WorkerMeta {
-	readonly machineId: string;
-	readonly startedAt: number;
-	readonly jobsProcessed: number;
-	readonly lastJobAt?: number;
-	readonly status: "active" | "draining" | "exiting";
+	readonly state: "running" | "idle" | "stopped";
+	readonly lastActiveAt: number; // Unix timestamp ms
+	readonly createdAt: number; // Unix timestamp ms
 }
 
 // =============================================================================
@@ -110,29 +100,20 @@ export interface WorkerMeta {
 // =============================================================================
 
 export const RWOS_CONFIG = {
-	/** Maximum concurrent Fly machines */
-	MAX_MACHINES: 5,
+	/** Maximum concurrent Fly machines (running + stopped) */
+	MAX_MACHINES: 10,
 
 	/** Rate limit: 1 request per second for Fly API */
 	RATE_LIMIT_WINDOW_MS: 1000,
 
-	/** Machine TTL in milliseconds (5 minutes) */
-	MACHINE_TTL_MS: 300_000,
+	/** Idle timeout before stopping machine (5 minutes) */
+	IDLE_TIMEOUT_MS: 300_000,
 
-	/** Maximum jobs per machine before drain */
-	MAX_JOBS_PER_MACHINE: 3,
-
-	/** Time buffer before TTL to start draining (60 seconds) */
-	DRAIN_BUFFER_MS: 60_000,
+	/** Poll interval when waiting for jobs (5 seconds) */
+	POLL_INTERVAL_MS: 5_000,
 
 	/** Job status TTL in seconds (24 hours) */
 	JOB_STATUS_TTL_SECONDS: 86_400,
-
-	/** Lease expiry buffer beyond machine TTL (30 seconds) */
-	LEASE_BUFFER_MS: 30_000,
-
-	/** Poll interval when waiting for jobs (5 seconds) */
-	JOB_POLL_INTERVAL_MS: 5_000,
 
 	/** Maximum retries for failed jobs */
 	MAX_JOB_RETRIES: 3,
@@ -219,26 +200,28 @@ export const deserializeJobData = (data: Record<string, string | null>): JobData
 	};
 };
 
-export const serializeWorkerLease = (lease: WorkerLease): Record<string, string> => ({
-	machineId: lease.machineId,
-	expiresAt: String(lease.expiresAt),
-	startedAt: String(lease.startedAt),
-	jobsProcessed: String(lease.jobsProcessed),
-	maxJobs: String(lease.maxJobs),
-	maxLifetimeMs: String(lease.maxLifetimeMs),
-});
+export const serializeMachinePoolEntry = (entry: MachinePoolEntry): string => {
+	return JSON.stringify({
+		state: entry.state,
+		lastActiveAt: entry.lastActiveAt,
+		createdAt: entry.createdAt,
+	});
+};
 
-export const deserializeWorkerLease = (data: Record<string, string | null>): WorkerLease | null => {
-	if (!data.machineId || !data.expiresAt) {
+export const deserializeMachinePoolEntry = (machineId: string, data: string | null): MachinePoolEntry | null => {
+	if (!data) {
 		return null;
 	}
 
-	return {
-		machineId: data.machineId,
-		expiresAt: Number(data.expiresAt),
-		startedAt: Number(data.startedAt) || Date.now(),
-		jobsProcessed: Number(data.jobsProcessed) || 0,
-		maxJobs: Number(data.maxJobs) || RWOS_CONFIG.MAX_JOBS_PER_MACHINE,
-		maxLifetimeMs: Number(data.maxLifetimeMs) || RWOS_CONFIG.MACHINE_TTL_MS,
-	};
+	try {
+		const parsed = JSON.parse(data);
+		return {
+			machineId,
+			state: parsed.state || "running",
+			lastActiveAt: Number(parsed.lastActiveAt) || Date.now(),
+			createdAt: Number(parsed.createdAt) || Date.now(),
+		};
+	} catch {
+		return null;
+	}
 };

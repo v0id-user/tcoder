@@ -4,51 +4,49 @@ skinparam boxPadding 10
 skinparam participantPadding 8
 autonumber "<b>[0]"
 
-title Admission Control Flow - Rate Limiting & Capacity Management
+title Admission Control Flow - Pool-Based Capacity Management
 
 participant CF as "Cloudflare Worker\n(Control Plane)"
 database Redis as "Upstash Redis"
 participant Fly as "Fly Machines API"
 
-== Rate Limit Check ==
-CF -> Redis: INCR counters:rate_limit\n(TTL 1 second)
-Redis --> CF: count
+== Check Stopped Machines First ==
+CF -> Redis: SPOP machines:stopped
+Redis --> CF: machine_id or null
 
-alt count > 1 (Rate Limited)
-    CF -> CF: Sleep 1 second
-    CF -> Redis: INCR counters:rate_limit
-    Redis --> CF: count = 1
-end
-
-== Capacity Check ==
-CF -> Redis: GET counters:active_machines
-Redis --> CF: current_count
-
-alt current_count >= MAX_MACHINES (5)
-    note right of CF: Capacity Full
-    CF --> CF: Return "queued" status\n(Job waits for existing workers)
-else current_count < MAX_MACHINES
-    note right of CF: Capacity Available
-
-    == Reserve Slot ==
-    CF -> Redis: INCR counters:active_machines
-    Redis --> CF: slot_number
-
-    == Create Machine ==
-    CF -> Fly: POST /apps/{app}/machines\n(with exponential backoff)
-
-    alt 429 or 5xx
-        CF -> CF: Backoff and retry
-        CF -> Fly: Retry create
-    end
-
-    Fly --> CF: { id: machine_id, state: "started" }
-
-    == Register Lease ==
-    CF -> Redis: HSET workers:leases\n{ machine_id: expiry_timestamp }
-    CF -> Redis: HSET workers:meta:{machine_id}\n{ startedAt, status: "active" }
-
+alt machine_id found (Reuse)
+    note right of CF: Reuse Stopped Machine
+    CF -> Fly: POST /apps/{app}/machines/{id}/start
+    Fly --> CF: Machine started
+    CF -> Redis: HSET machines:pool\n{ state: "running", lastActiveAt }
+    CF -> Redis: SREM machines:stopped
     CF --> CF: Return { job_id, machine_id }
+else no stopped machines (Create New)
+    == Pool Capacity Check ==
+    CF -> Redis: HGETALL machines:pool
+    Redis --> CF: pool_entries (running + stopped)
+
+    alt pool_size >= MAX_MACHINES (10)
+        note right of CF: Pool Full
+        CF --> CF: Return "queued" status\n(Job waits for existing workers)
+    else pool_size < MAX_MACHINES
+        note right of CF: Pool Capacity Available
+
+        == Create Machine ==
+        CF -> Fly: POST /apps/{app}/machines\n(with exponential backoff)
+
+        alt 429 or 5xx
+            CF -> CF: Backoff and retry
+            CF -> Fly: Retry create
+        end
+
+        Fly --> CF: { id: machine_id, state: "started" }
+
+        == Add to Pool ==
+        CF -> Redis: HSET machines:pool\n{ state: "running", lastActiveAt, createdAt }
+
+        CF --> CF: Return { job_id, machine_id }
+    end
 end
 
 @enduml

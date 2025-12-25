@@ -15,7 +15,7 @@ box "Cloudflare Ecosystem" #e3f2fd
 end box
 
 box "Compute Infrastructure" #fff3e0
-    participant Fly as "Fly.io Machine\n(TTL-Bounded Worker)"
+    participant Fly as "Fly.io Machine\n(Pooled Worker)"
 end box
 
 box "Distribution" #f3e5f5
@@ -40,41 +40,45 @@ R2 -[#blue]> Worker: Event Notification (Object Created)
 == 3. Job Orchestration Phase ==
 activate Worker
 Worker -> Redis: ZADD jobs:pending (enqueue job)
-Worker -> Redis: INCR counters:rate_limit (check rate limit)
-alt Rate Limited
-    Redis --> Worker: count > 1
-    Worker -> Worker: Delay 1s, retry
-end
-Worker -> Redis: GET counters:active_machines
-alt Capacity Available
-    Worker -> Redis: INCR counters:active_machines
-    Worker -> Fly: Create Machine via Machines API
+Worker -> Redis: SPOP machines:stopped (check stopped machines)
+alt Stopped Machine Available
+    Worker -> Fly: POST /machines/{id}/start (start stopped machine)
     activate Fly
-    Fly --> Worker: machine_id
-    Worker -> Redis: HSET workers:leases {machine_id}
-else Capacity Full
-    Worker --> Worker: Job stays queued for existing workers
+    Fly --> Worker: Machine started
+    Worker -> Redis: HSET machines:pool {state: "running"}
+    Worker -> Redis: SREM machines:stopped
+else No Stopped Machines
+    Worker -> Redis: HGETALL machines:pool (check pool size)
+    alt Pool Size < MAX_MACHINES (10)
+        Worker -> Fly: Create Machine via Machines API
+        activate Fly
+        Fly --> Worker: machine_id
+        Worker -> Redis: HSET machines:pool {state: "running"}
+    else Pool Full
+        Worker --> Worker: Job stays queued for existing workers
+    end
 end
 Worker --> Client: Return job_id + status
 deactivate Worker
 
-'--- 4. Processing Phase (Multi-Job Worker) ---
+'--- 4. Processing Phase (Indefinite Polling) ---
 == 4. Processing Phase ==
-Fly -> Redis: Acquire Lease (HSET workers:leases)
-loop Until TTL or Max Jobs
+Fly -> Redis: Initialize in pool\n(HSET machines:pool {state: "running"})
+loop Indefinitely (until stopped externally)
     Fly -> Redis: ZPOPMIN jobs:pending (atomic pop)
     alt Job Available
+        Fly -> Redis: HSET machines:pool {state: "running", lastActiveAt}
         Fly -> Redis: HSET jobs:status (running)
         Fly -> R2: Download Raw Video
         Fly -> Fly: FFmpeg Transcode\n(480p, 720p, 1080p)
         Fly -> R2: Upload Processed Qualities
         Fly -> Redis: HSET jobs:status (completed)
         Fly -> Worker: Webhook: Job Complete
-    else No Jobs + TTL Near
-        Fly -> Fly: Enter drain mode
+    else No Jobs Available
+        Fly -> Redis: HSET machines:pool {state: "idle", lastActiveAt}
+        Fly -> Fly: Sleep POLL_INTERVAL (5s)
     end
 end
-Fly -> Redis: Release Lease + DECR counters
 deactivate Fly
 
 '--- 5. Discoverability Phase ---
@@ -96,12 +100,15 @@ end
 CDN --> Client: Stream Video
 deactivate CDN
 
-'--- 7. Failure Recovery (Cron) ---
-== 7. Failure Recovery (Cron) ==
-Worker -> Redis: Scan expired leases
-alt Stale Jobs Found
-    Worker -> Redis: Requeue jobs (ZADD + status update)
-    Worker -> Redis: Cleanup expired leases (HDEL)
+'--- 7. Idle Machine Management (Cron) ---
+== 7. Idle Machine Management (Cron) ==
+Worker -> Redis: HGETALL machines:pool
+loop For each machine
+    alt state == "idle" AND\nlastActiveAt < (now - 5 minutes)
+        Worker -> Fly: POST /machines/{id}/stop
+        Worker -> Redis: HSET machines:pool {state: "stopped"}
+        Worker -> Redis: SADD machines:stopped {machine_id}
+    end
 end
 
 @enduml

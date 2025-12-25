@@ -2,24 +2,24 @@
 !theme plain
 skinparam stateFontSize 12
 
-title Worker Lifecycle - TTL-Bounded Multi-Job Processing
+title Worker Lifecycle - Pooled Indefinite Polling
 
-[*] --> Starting : Machine Created\nvia Machines API
+[*] --> Starting : Machine Started\n(via Machines API or Pool)
 
 state Starting {
     Starting : Connect to Redis
     Starting : Read env variables
+    Starting : Initialize in pool\n(HSET machines:pool)
 }
 
-Starting --> Active : Lease Acquired\n(HSET workers:leases)
+Starting --> Running : Pool Entry Created\n(state: "running")
 
-state Active {
-    Active : Polling job queue
-    Active : jobs_processed < MAX_JOBS
-    Active : elapsed < TTL
+state Running {
+    Running : Polling job queue\n(indefinitely)
+    Running : Update lastActiveAt
 }
 
-Active --> Processing : ZPOPMIN returns job
+Running --> Processing : ZPOPMIN returns job
 
 state Processing {
     Processing : Download from R2
@@ -27,43 +27,42 @@ state Processing {
     Processing : Upload to R2
     Processing : Update Redis status
     Processing : Send webhook
+    Processing : Update pool state\n(state: "running")
 }
 
-Processing --> Active : Job Complete\njobs_processed++
+Processing --> Running : Job Complete\nUpdate lastActiveAt
 
-Active --> Draining : TTL < 60s OR\njobs >= MAX_JOBS
+Running --> Idle : ZPOPMIN returns null\n(no jobs available)
 
-state Draining {
-    Draining : No new jobs accepted
-    Draining : Finish current if any
+state Idle {
+    Idle : Update pool state\n(state: "idle")
+    Idle : Update lastActiveAt
+    Idle : Sleep POLL_INTERVAL
 }
 
-Draining --> Processing : Current job in progress
+Idle --> Running : Continue polling
 
-Processing --> Exiting : Job Complete +\nDraining = true
+Idle --> [*] : Stopped by Cron\n(idle > 5 minutes)\n(Machines_stop API)
 
-Active --> Exiting : Queue empty +\nTTL expired
-
-state Exiting {
-    Exiting : Release lease (HDEL)
-    Exiting : DECR active_machines
-    Exiting : Cleanup temp files
-}
-
-Exiting --> [*] : process.exit(0)
-
-note right of Active
+note right of Running
   **Constants:**
-  TTL = 5 minutes
-  MAX_JOBS = 3
   POLL_INTERVAL = 5s
-  DRAIN_BUFFER = 60s
+  IDLE_TIMEOUT = 5 minutes
+  Workers poll indefinitely
+  No TTL or drain logic
 end note
 
 note right of Processing
   **Job Status Updates:**
   pending → running → completed/failed
   All tracked in Redis HASH
+end note
+
+note right of Idle
+  **Pool State:**
+  machines:pool tracks state
+  Cron stops idle machines
+  Stopped machines reused
 end note
 
 @enduml

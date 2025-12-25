@@ -314,7 +314,8 @@ tcoder/
 ```bash
 # Copy example env file
 cp env.local.example .env
-# Fill in R2 credentials in .env
+cp env.local.example .dev.vars
+# Fill in R2 credentials in both files
 
 # Start everything
 bun run dev

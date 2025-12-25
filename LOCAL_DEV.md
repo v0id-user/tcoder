@@ -11,22 +11,26 @@ This guide explains how to run the tcoder system locally for development and tes
 
 ## Quick Start
 
-### 1. Create `.env` File
+### 1. Create Environment Files
 
 ```bash
+# For docker-compose (fly-worker)
 cp env.local.example .env
-# Then fill in R2 credentials and Upstash Redis (for Cloudflare Worker)
+
+# For wrangler dev (Cloudflare Worker)
+cp env.local.example .dev.vars
+
+# Then fill in R2 credentials in both files
 ```
 
 The `env.local.example` file has local Redis values pre-filled:
 - `UPSTASH_REDIS_REST_URL=http://localhost:8079` (SRH proxy)
 - `UPSTASH_REDIS_REST_TOKEN=local_dev_token`
 
-You only need to add:
+**Important:** Both `.env` and `.dev.vars` should use the **same local Redis values** for local development. You only need to add:
 - **R2 credentials** (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`)
-- **Upstash Redis** (for Cloudflare Worker - get from [console.upstash.com](https://console.upstash.com))
 
-> **Note:** For local development, the fly-worker uses a local Redis with [Serverless Redis HTTP (SRH)](https://upstash.com/docs/redis/sdks/ts/developing) proxy that emulates the Upstash API. Redis credentials are hardcoded in docker-compose.
+> **Note:** For local development, both Cloudflare Worker and fly-worker use the local [Serverless Redis HTTP (SRH)](https://upstash.com/docs/redis/sdks/ts/developing) proxy that emulates the Upstash API. The fly-worker's Redis URL is also hardcoded in docker-compose.
 
 ### 2. Run Everything
 

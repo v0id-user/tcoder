@@ -20,13 +20,13 @@ package "Redis State Store" #fff8e1 {
     database "jobs:pending" as JobQueue
     database "jobs:active" as ActiveJobs
     database "jobs:status" as JobStatus
-    database "workers:leases" as WorkerLeases
-    database "counters" as Counters
+    database "machines:pool" as MachinePool
+    database "machines:stopped" as StoppedMachines
 }
 
 ' Bottom: Execution Layer
 package "Execution Layer" #fff3e0 {
-    node "Worker\nTTL: 5min" as W1
+    node "Worker\n(Poll Indefinitely)" as W1
 }
 
 cloud "R2 Storage" as R2 #f3e5f5
@@ -34,21 +34,21 @@ cloud "R2 Storage" as R2 #f3e5f5
 ' Job Submission Flow (vertical, top to bottom)
 API --> JobQueue : "1. Enqueue"
 API --> AdmCtrl : "2. Check"
-AdmCtrl --> Counters : "3. Read"
-AdmCtrl --> Spawner : "4. Spawn"
-Spawner --> W1 : "5. Create"
+AdmCtrl --> MachinePool : "3. Check Pool Size"
+AdmCtrl --> StoppedMachines : "4. Check Stopped"
+AdmCtrl --> Spawner : "5. Spawn/Start"
+Spawner --> W1 : "6. Create/Start"
 
 ' Worker Processing Flow (bottom to top)
-W1 --> WorkerLeases : "6. Lease"
-W1 --> JobQueue : "7. Pop"
-W1 --> ActiveJobs : "8. Claim"
-W1 --> JobStatus : "9. Update"
-W1 --> R2 : "10. Storage"
-W1 --> API : "11. Webhook"
-W1 --> Counters : "12. Release"
+W1 --> MachinePool : "7. Update State\n(running/idle)"
+W1 --> JobQueue : "8. Pop"
+W1 --> ActiveJobs : "9. Claim"
+W1 --> JobStatus : "10. Update"
+W1 --> R2 : "11. Storage"
+W1 --> API : "12. Webhook"
 
 ' Maintenance Flow
-Cron --> WorkerLeases : "Cleanup"
-Cron --> JobQueue : "Requeue"
+Cron --> MachinePool : "Stop Idle\n(idle > 5min)"
+Cron --> StoppedMachines : "Add to Stopped"
 
 @enduml
