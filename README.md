@@ -28,16 +28,19 @@ bun install
 
 ```bash
 # Create R2 buckets
-wrangler r2 bucket create tcoder-input
-wrangler r2 bucket create tcoder-output
+bunx wrangler r2 bucket create tcoder-input
+bunx wrangler r2 bucket create tcoder-output
 
 # Create queue for event notifications
-wrangler queues create tcoder-events
+bunx wrangler queues create tcoder-events
 
 # Enable event notifications on input bucket
-wrangler r2 bucket notification create tcoder-input \
-  --event-type object-create \
-  --queue tcoder-events
+bunx wrangler r2 bucket notification create tcoder-input --event-type object-create --queue tcoder-events
+```
+
+**One-liner (all at once):**
+```bash
+bunx wrangler r2 bucket create tcoder-input && bunx wrangler r2 bucket create tcoder-output && bunx wrangler queues create tcoder-events && bunx wrangler r2 bucket notification create tcoder-input --event-type object-create --queue tcoder-events
 ```
 
 ### 3. Set Cloudflare Worker Secrets
