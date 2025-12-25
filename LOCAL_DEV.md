@@ -7,29 +7,20 @@ This guide explains how to run the tcoder system locally for development and tes
 - [Bun](https://bun.sh) runtime
 - Docker
 - Cloudflare account (for Workers, R2, Queues)
-- Upstash account (for Redis - free tier works fine)
+- Upstash account (for Redis HTTP API - free tier works)
 
 ## Quick Start
 
-### 1. Set Up Hosted Services
+### 1. Set Up Upstash Redis
 
-**Upstash Redis (free tier):**
-1. Go to [console.upstash.com](https://console.upstash.com)
-2. Create a new Redis database
-3. Copy the REST URL and REST Token
+Go to [console.upstash.com](https://console.upstash.com) and create a Redis database.
 
-**Cloudflare R2:**
-- Create R2 API token at https://dash.cloudflare.com → R2 → Manage R2 API Tokens
+The Cloudflare Worker needs the **REST API** credentials from Upstash.
 
 ### 2. Create `.env` File
 
-Create a `.env` file in the root directory (used by both wrangler and fly-worker):
-
 ```env
-# Redis (direct connection for fly-worker)
-REDIS_URL=redis://user:password@your-redis-host:6379
-
-# Upstash Redis (HTTP API for Cloudflare Worker)
+# Upstash Redis - REST API (for Cloudflare Worker)
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
 UPSTASH_REDIS_REST_TOKEN=your-token
 
@@ -46,6 +37,8 @@ R2_INPUT_BUCKET_NAME=tcoder-input
 R2_OUTPUT_BUCKET_NAME=tcoder-output
 ```
 
+> **Note:** The fly-worker uses a **local Redis** container (no config needed). The Cloudflare Worker uses Upstash REST API.
+
 ### 3. Run Everything
 
 ```bash
@@ -53,45 +46,79 @@ bun run dev
 ```
 
 This starts:
-- **Fly-worker** - Docker container polling Redis for jobs
+- **Local Redis** - `localhost:6379` (no password)
+- **Fly-worker** - Docker container polling local Redis
 - **Wrangler dev** - API at `http://localhost:8787`
 - **Scheduled trigger** - Hits cron endpoint every 5 minutes
 
-All three run together. Press `Ctrl+C` to stop everything.
+All run together. Press `Ctrl+C` to stop everything.
+
+## Local Redis
+
+For local development, we run Redis in Docker:
+- **URL:** `redis://localhost:6379`
+- **No password** required
+- Data persisted in Docker volume `redis-data`
+
+The fly-worker automatically connects to this local Redis (hardcoded in docker-compose).
 
 ## Scripts
 
 | Command | Description |
 |---------|-------------|
-| `bun run dev` | Start everything (fly-worker + wrangler + trigger) |
+| `bun run dev` | Start everything (redis + fly-worker + wrangler + trigger) |
 | `bun run fly-worker:build` | Build fly-worker Docker image only |
 | `bun run fly-worker:run` | Run fly-worker container once |
 
-## Architecture Notes
+## Architecture (Local Dev)
 
-- **Cloudflare Worker**: Handles API, R2 events, job orchestration
-- **Upstash Redis**: Job queue, worker leases, state management
-- **Fly-worker**: One-shot FFmpeg container spawned on demand
+```
+┌─────────────────┐     ┌─────────────────┐
+│ Cloudflare      │     │ Local Redis     │
+│ Worker (API)    │────▶│ localhost:6379  │◀────┐
+│ :8787           │     └─────────────────┘     │
+└─────────────────┘                              │
+                                                 │
+                       ┌─────────────────┐       │
+                       │ Fly-worker      │───────┘
+                       │ (Docker)        │
+                       └─────────────────┘
+```
 
-All services use hosted/managed infrastructure. No local databases or custom proxies needed.
+**Note:** In local dev, the Cloudflare Worker uses Upstash REST API while the fly-worker uses local Redis. For full integration testing, both should point to the same Redis (use Upstash for both, see Production Setup).
+
+## Production Setup
+
+For production, both services connect to Upstash:
+- **Cloudflare Worker:** `UPSTASH_REDIS_REST_URL` (HTTP API)
+- **Fly-worker:** `REDIS_URL` (direct TCP via ioredis)
+
+Get the direct TCP URL from Upstash Console → Connect → ioredis:
+```
+rediss://default:password@your-redis.upstash.io:6379
+```
 
 ## Troubleshooting
 
-### Fly-worker Missing Environment Variables
+### Fly-worker Can't Connect to Redis
 
-The fly-worker requires these env vars in `.env`:
-- `REDIS_URL` (direct Redis connection, e.g. `redis://user:pass@host:6379`)
-- `R2_ACCOUNT_ID`
-- `R2_ACCESS_KEY_ID`
-- `R2_SECRET_ACCESS_KEY`
-- `R2_OUTPUT_BUCKET_NAME`
+Check that the Redis container is running:
+```bash
+docker ps | grep tcoder-redis
+```
 
-If any are missing, the worker will exit with an error listing which ones are missing.
+### Redis Data Cleanup
 
-### Worker Can't Connect to Redis
+To reset local Redis data:
+```bash
+docker-compose down -v
+```
 
-- Verify your Upstash credentials in `.env`
-- Check that the REST URL starts with `https://`
+### Cloudflare Worker Can't Connect to Upstash
+
+- Verify credentials in `.env`
+- REST URL should start with `https://`
+- Check the Upstash console for correct values
 
 ### Scheduled Endpoint Not Triggering
 

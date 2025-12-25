@@ -1,20 +1,35 @@
 # Docker Compose for local development
-# Runs fly-worker container that polls Redis for jobs
+# Runs local Redis + fly-worker for testing
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: tcoder-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+
   fly-worker:
     build:
       context: ./fly
       dockerfile: Dockerfile
     container_name: tcoder-fly-worker
-    env_file:
-      - .env
     environment:
-      # Override webhook URL to reach host machine
+      # Local Redis (no auth needed)
+      - REDIS_URL=redis://redis:6379
+      # Webhook to host machine
       - WEBHOOK_URL=http://host.docker.internal:8787/webhooks/job-complete
       # Local dev machine ID
       - FLY_MACHINE_ID=local-dev-worker
+    env_file:
+      - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Restart on failure, max 5 attempts
+    depends_on:
+      - redis
     restart: on-failure:5
+
+volumes:
+  redis-data:
