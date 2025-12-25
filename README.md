@@ -51,19 +51,24 @@ wrangler secret put UPSTASH_REDIS_REST_URL
 wrangler secret put UPSTASH_REDIS_REST_TOKEN
 
 # Fly.io credentials
-wrangler secret put FLY_API_TOKEN
-wrangler secret put FLY_APP_NAME      # fly-tcoder-ffmpeg-worker-31657fa
-wrangler secret put FLY_REGION        # fra
+bunx wrangler secret put FLY_API_TOKEN
+bunx wrangler secret put FLY_APP_NAME      # fly-tcoder-ffmpeg-worker-31657fa
+bunx wrangler secret put FLY_REGION        # fra
 
 # R2 credentials (for presigned URLs)
 wrangler secret put R2_ACCOUNT_ID
+
 wrangler secret put R2_ACCESS_KEY_ID
 wrangler secret put R2_SECRET_ACCESS_KEY
+
 wrangler secret put R2_INPUT_BUCKET_NAME   # tcoder-input
 wrangler secret put R2_OUTPUT_BUCKET_NAME  # tcoder-output
 
 # Worker URL
 wrangler secret put WEBHOOK_BASE_URL  # https://tcoder.<your-subdomain>.workers.dev
+
+# or
+bunx wrangler secret bulk .env
 ```
 
 ### 4. Set Up Fly.io Workers
