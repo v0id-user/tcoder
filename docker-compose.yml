@@ -1,15 +1,28 @@
 # Docker Compose for local development
-# Runs local Redis + fly-worker for testing
+# Uses Serverless Redis HTTP (SRH) to emulate Upstash API locally
+# https://upstash.com/docs/redis/sdks/ts/developing
 
 services:
   redis:
     image: redis:7-alpine
     container_name: tcoder-redis
-    ports:
-      - "6379:6379"
     command: redis-server --appendonly yes
     volumes:
       - redis-data:/data
+
+  # Upstash-compatible HTTP proxy for Redis
+  # https://github.com/hiett/serverless-redis-http
+  serverless-redis-http:
+    image: hiett/serverless-redis-http:latest
+    container_name: tcoder-redis-http
+    ports:
+      - "8079:80"
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: local_dev_token
+      SRH_CONNECTION_STRING: "redis://redis:6379"
+    depends_on:
+      - redis
 
   fly-worker:
     build:
@@ -17,18 +30,19 @@ services:
       dockerfile: Dockerfile
     container_name: tcoder-fly-worker
     environment:
-      # Local Redis (no auth needed)
-      - REDIS_URL=redis://redis:6379
+      # Local SRH emulates Upstash HTTP API
+      UPSTASH_REDIS_REST_URL: http://serverless-redis-http:80
+      UPSTASH_REDIS_REST_TOKEN: local_dev_token
       # Webhook to host machine
-      - WEBHOOK_URL=http://host.docker.internal:8787/webhooks/job-complete
+      WEBHOOK_URL: http://host.docker.internal:8787/webhooks/job-complete
       # Local dev machine ID
-      - FLY_MACHINE_ID=local-dev-worker
+      FLY_MACHINE_ID: local-dev-worker
     env_file:
       - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - redis
+      - serverless-redis-http
     restart: on-failure:5
 
 volumes:

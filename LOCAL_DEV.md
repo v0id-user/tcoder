@@ -7,23 +7,12 @@ This guide explains how to run the tcoder system locally for development and tes
 - [Bun](https://bun.sh) runtime
 - Docker
 - Cloudflare account (for Workers, R2, Queues)
-- Upstash account (for Redis HTTP API - free tier works)
 
 ## Quick Start
 
-### 1. Set Up Upstash Redis
-
-Go to [console.upstash.com](https://console.upstash.com) and create a Redis database.
-
-The Cloudflare Worker needs the **REST API** credentials from Upstash.
-
-### 2. Create `.env` File
+### 1. Create `.env` File
 
 ```env
-# Upstash Redis - REST API (for Cloudflare Worker)
-UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
-UPSTASH_REDIS_REST_TOKEN=your-token
-
 # Fly.io
 FLY_API_TOKEN=your-fly-token
 FLY_APP_NAME=your-fly-app-name
@@ -35,77 +24,88 @@ R2_ACCESS_KEY_ID=your-access-key
 R2_SECRET_ACCESS_KEY=your-secret-key
 R2_INPUT_BUCKET_NAME=tcoder-input
 R2_OUTPUT_BUCKET_NAME=tcoder-output
+
+# Upstash Redis (for Cloudflare Worker - get from console.upstash.com)
+UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-token
 ```
 
-> **Note:** The fly-worker uses a **local Redis** container (no config needed). The Cloudflare Worker uses Upstash REST API.
+> **Note:** For local development, the fly-worker uses a local Redis with [Serverless Redis HTTP (SRH)](https://upstash.com/docs/redis/sdks/ts/developing) proxy that emulates the Upstash API. No Upstash credentials needed for fly-worker locally.
 
-### 3. Run Everything
+### 2. Run Everything
 
 ```bash
 bun run dev
 ```
 
 This starts:
-- **Local Redis** - `localhost:6379` (no password)
-- **Fly-worker** - Docker container polling local Redis
+- **Redis** - Local Redis container
+- **SRH Proxy** - Upstash-compatible HTTP API at `http://localhost:8079`
+- **Fly-worker** - Docker container polling Redis for jobs
 - **Wrangler dev** - API at `http://localhost:8787`
 - **Scheduled trigger** - Hits cron endpoint every 5 minutes
 
 All run together. Press `Ctrl+C` to stop everything.
 
-## Local Redis
+## Architecture (Local Dev)
 
-For local development, we run Redis in Docker:
-- **URL:** `redis://localhost:6379`
-- **No password** required
-- Data persisted in Docker volume `redis-data`
+```
+┌─────────────────────┐
+│ Cloudflare Worker   │──── Uses Upstash (production Redis)
+│ :8787               │
+└─────────────────────┘
 
-The fly-worker automatically connects to this local Redis (hardcoded in docker-compose).
+┌─────────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│ Fly-worker          │────▶│ SRH Proxy       │────▶│ Local Redis     │
+│ (Docker)            │     │ :8079           │     │ (Docker)        │
+└─────────────────────┘     └─────────────────┘     └─────────────────┘
+```
+
+**Local credentials (hardcoded in docker-compose):**
+- **SRH URL:** `http://localhost:8079`
+- **SRH Token:** `local_dev_token`
 
 ## Scripts
 
 | Command | Description |
 |---------|-------------|
-| `bun run dev` | Start everything (redis + fly-worker + wrangler + trigger) |
+| `bun run dev` | Start everything (redis + srh + fly-worker + wrangler + trigger) |
 | `bun run fly-worker:build` | Build fly-worker Docker image only |
 | `bun run fly-worker:run` | Run fly-worker container once |
-
-## Architecture (Local Dev)
-
-```
-┌─────────────────┐     ┌─────────────────┐
-│ Cloudflare      │     │ Local Redis     │
-│ Worker (API)    │────▶│ localhost:6379  │◀────┐
-│ :8787           │     └─────────────────┘     │
-└─────────────────┘                              │
-                                                 │
-                       ┌─────────────────┐       │
-                       │ Fly-worker      │───────┘
-                       │ (Docker)        │
-                       └─────────────────┘
-```
-
-**Note:** In local dev, the Cloudflare Worker uses Upstash REST API while the fly-worker uses local Redis. For full integration testing, both should point to the same Redis (use Upstash for both, see Production Setup).
 
 ## Production Setup
 
 For production, both services connect to Upstash:
-- **Cloudflare Worker:** `UPSTASH_REDIS_REST_URL` (HTTP API)
-- **Fly-worker:** `REDIS_URL` (direct TCP via ioredis)
 
-Get the direct TCP URL from Upstash Console → Connect → ioredis:
+**Cloudflare Worker** (via wrangler secrets):
+```bash
+wrangler secret put UPSTASH_REDIS_REST_URL
+wrangler secret put UPSTASH_REDIS_REST_TOKEN
 ```
-rediss://default:password@your-redis.upstash.io:6379
+
+**Fly-worker** (via fly secrets):
+```bash
+fly secrets set UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
+fly secrets set UPSTASH_REDIS_REST_TOKEN=your-token
+fly secrets set R2_ACCOUNT_ID=...
+fly secrets set R2_ACCESS_KEY_ID=...
+fly secrets set R2_SECRET_ACCESS_KEY=...
+fly secrets set R2_OUTPUT_BUCKET_NAME=...
 ```
 
 ## Troubleshooting
 
 ### Fly-worker Can't Connect to Redis
 
-Check that the Redis container is running:
+Check that all containers are running:
 ```bash
-docker ps | grep tcoder-redis
+docker ps | grep tcoder
 ```
+
+You should see:
+- `tcoder-redis`
+- `tcoder-redis-http`
+- `tcoder-fly-worker`
 
 ### Redis Data Cleanup
 
@@ -114,11 +114,16 @@ To reset local Redis data:
 docker-compose down -v
 ```
 
-### Cloudflare Worker Can't Connect to Upstash
+### Test SRH Proxy
 
-- Verify credentials in `.env`
-- REST URL should start with `https://`
-- Check the Upstash console for correct values
+```bash
+curl -X POST http://localhost:8079 \
+  -H "Authorization: Bearer local_dev_token" \
+  -H "Content-Type: application/json" \
+  -d '["PING"]'
+```
+
+Should return: `{"result":"PONG"}`
 
 ### Scheduled Endpoint Not Triggering
 

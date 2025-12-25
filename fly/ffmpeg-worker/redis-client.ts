@@ -1,11 +1,14 @@
 /**
  * Redis Client for Fly Workers (Bun runtime)
  *
- * Uses ioredis for direct TCP connection to Redis.
- * Workers get Redis URL via REDIS_URL environment variable.
+ * Uses @upstash/redis HTTP client for compatibility with:
+ * - Production: Upstash Redis
+ * - Local dev: Serverless Redis HTTP (SRH) proxy
+ *
+ * https://upstash.com/docs/redis/sdks/ts/developing
  */
 
-import Redis from "ioredis";
+import { Redis } from "@upstash/redis";
 import { Context, Effect, Layer } from "effect";
 
 // =============================================================================
@@ -45,30 +48,17 @@ export const redisEffect = <T>(operation: (redis: Redis) => Promise<T>): Effect.
 export const makeRedisLayer = Layer.effect(
 	RedisService,
 	Effect.sync(() => {
-		const url = process.env.REDIS_URL;
+		const url = process.env.UPSTASH_REDIS_REST_URL;
+		const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-		if (!url) {
-			console.error("Missing env: REDIS_URL");
+		if (!url || !token) {
+			console.error("Missing env: UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN");
 			process.exit(1);
 		}
 
-		console.log(`[Redis] Connecting to ${url.replace(/\/\/.*@/, "//***@").substring(0, 50)}...`);
+		console.log(`[Redis] Connecting to ${url.substring(0, 50)}...`);
 
-		const client = new Redis(url, {
-			maxRetriesPerRequest: 3,
-			retryStrategy: (times) => {
-				if (times > 3) return null;
-				return Math.min(times * 200, 1000);
-			},
-		});
-
-		client.on("error", (err) => {
-			console.error("[Redis] Connection error:", err.message);
-		});
-
-		client.on("connect", () => {
-			console.log("[Redis] Connected");
-		});
+		const client = new Redis({ url, token });
 
 		return { client };
 	}),
