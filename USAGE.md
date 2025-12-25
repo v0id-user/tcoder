@@ -220,7 +220,7 @@ uploading → queued → pending → running → completed
 
 | Status | Description |
 |--------|-------------|
-| `uploading` | Presigned URL generated, waiting for upload |
+| `uploading` | Presigned URL generated, waiting for upload. Automatically recovered if file is uploaded but event notification is delayed |
 | `queued` | Upload complete, event received |
 | `pending` | In job queue, waiting for worker |
 | `running` | Worker processing |
@@ -341,4 +341,13 @@ All endpoints may return error responses:
 - Maximum concurrent machines: 5 (configurable)
 - Rate limit: 1 request per second for Fly API operations
 - Check job status periodically by running the GET job status command multiple times
+
+### Automatic Recovery
+
+The system includes automatic recovery for jobs stuck in `"uploading"` status:
+
+- **Recovery Window**: If a file is uploaded but the R2 event notification is delayed or lost, the system will automatically detect and recover the job after the presigned URL expiry time plus a 5-minute buffer (approximately 65 minutes after job creation)
+- **File Verification**: The recovery process checks if the file actually exists in R2 before transitioning the job to `"pending"` status
+- **Failed Upload Handling**: Jobs that remain in `"uploading"` status for more than 2x the recovery threshold (approximately 2 hours) without a corresponding file in R2 will be automatically marked as `"failed"` with the error message "Upload never completed (file not found after extended wait)"
+- **No Action Required**: This recovery happens automatically in the background - you don't need to take any action if a job appears stuck in `"uploading"` status
 
