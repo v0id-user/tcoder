@@ -6,7 +6,8 @@
  */
 
 import { Effect } from "effect";
-import { RedisKeys, RWOS_CONFIG, deserializeJobData, serializeJobData, type JobData } from "../redis/schema";
+import { Redis } from "@upstash/redis/cloudflare";
+import { RedisKeys, RWOS_CONFIG, serializeJobData, type JobData } from "../redis/schema";
 import { extractJobIdFromKey } from "./presigned";
 import { makeRedisLayer } from "../redis/client";
 import { maybeSpawnWorker, type SpawnConfig } from "../orchestration/spawner";
@@ -73,7 +74,6 @@ export async function handleR2Events(
 	batch: MessageBatch<R2EventNotification>,
 	env: Env
 ): Promise<void> {
-	const { Redis } = await import("@upstash/redis/cloudflare");
 	const redis = Redis.fromEnv(env);
 
 	console.log(`[R2 Events] Processing ${batch.messages.length} events`);

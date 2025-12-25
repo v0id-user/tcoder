@@ -11,6 +11,7 @@
 import { Hono } from "hono";
 import { createRoutes, createWebhookRoutes } from "./api/routes";
 import { handleR2Events, type R2EventNotification, type MessageBatch } from "./r2/events";
+import { Redis } from "@upstash/redis/cloudflare";
 
 const app = new Hono();
 
@@ -48,7 +49,6 @@ export default {
 // =============================================================================
 
 async function handleScheduled(env: Env) {
-	const { Redis } = await import("@upstash/redis/cloudflare");
 	const redis = Redis.fromEnv(env);
 
 	console.log("[Cron] Checking for stale jobs...");

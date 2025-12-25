@@ -8,9 +8,9 @@
 		"enabled": true
 	},
 
-	// Cron trigger for stale job recovery (every minute)
+	// Cron trigger for stale job recovery (every 5 minutes)
 	"triggers": {
-		"crons": ["* * * * *"]
+		"crons": ["*/5 * * * *"]
 	},
 
 	// R2 bucket bindings

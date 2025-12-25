@@ -8,9 +8,11 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { Effect } from "effect";
+import { Redis } from "@upstash/redis/cloudflare";
 import { makeRedisLayer, type RedisEnv } from "../redis/client";
 import { RedisKeys, RWOS_CONFIG, serializeJobData, deserializeJobData, type JobData } from "../redis/schema";
 import { getAdmissionStats } from "../orchestration/admission";
+import { maybeSpawnWorker, type SpawnConfig } from "../orchestration/spawner";
 import {
 	createR2Client,
 	generateUploadUrl,
@@ -104,7 +106,6 @@ export const createRoutes = () => {
 		});
 
 		// Store job with "uploading" status in Redis
-		const { Redis } = await import("@upstash/redis/cloudflare");
 		const redis = Redis.fromEnv(c.env);
 
 		const jobData: JobData = {
@@ -143,8 +144,6 @@ export const createRoutes = () => {
 	app.post("/jobs", zValidator("json", submitJobSchema), async (c) => {
 		const body = c.req.valid("json");
 		const jobId = body.jobId || crypto.randomUUID();
-
-		const { Redis } = await import("@upstash/redis/cloudflare");
 		const redis = Redis.fromEnv(c.env);
 
 		const now = Date.now();
@@ -175,7 +174,6 @@ export const createRoutes = () => {
 
 		// Try to spawn worker if capacity available
 		const redisLayer = makeRedisLayer(c.env);
-		const { maybeSpawnWorker, type SpawnConfig } = await import("../orchestration/spawner");
 
 		const spawnConfig: SpawnConfig = {
 			flyApiToken: c.env.FLY_API_TOKEN,
@@ -209,8 +207,6 @@ export const createRoutes = () => {
 	 */
 	app.get("/jobs/:jobId", async (c) => {
 		const jobId = c.req.param("jobId");
-
-		const { Redis } = await import("@upstash/redis/cloudflare");
 		const redis = Redis.fromEnv(c.env);
 
 		const data = await redis.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId));
@@ -242,8 +238,6 @@ export const createRoutes = () => {
 	 */
 	app.get("/stats", async (c) => {
 		const redisLayer = makeRedisLayer(c.env);
-
-		const { Redis } = await import("@upstash/redis/cloudflare");
 		const redis = Redis.fromEnv(c.env);
 
 		const stats = await Effect.runPromise(
@@ -295,8 +289,6 @@ export const createWebhookRoutes = () => {
 	 */
 	app.post("/webhooks/job-complete", zValidator("json", webhookPayloadSchema), async (c) => {
 		const payload = c.req.valid("json");
-
-		const { Redis } = await import("@upstash/redis/cloudflare");
 		const redis = Redis.fromEnv(c.env);
 
 		// Update job status in Redis
