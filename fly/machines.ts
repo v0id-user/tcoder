@@ -11,10 +11,7 @@
 
 import { Effect, Context } from "effect";
 import { flyClient } from "./fly-client";
-import type {
-	CreateMachineRequest,
-	Machine,
-} from "./fly-machine-apis";
+import type { CreateMachineRequest, Machine } from "./fly-machine-apis";
 
 // Configuration
 interface FlyConfig {
@@ -23,10 +20,7 @@ interface FlyConfig {
 	readonly region: string;
 }
 
-class FlyConfigService extends Context.Tag("FlyConfigService")<
-	FlyConfigService,
-	FlyConfig
->() {}
+class FlyConfigService extends Context.Tag("FlyConfigService")<FlyConfigService, FlyConfig>() {}
 
 // Job parameters
 interface TranscodeJob {
@@ -108,15 +102,11 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 
 		const machine = yield* Effect.tryPromise({
 			try: () =>
-				flyClient.Machines_create(
-					{ app_name: config.appName },
-					request,
-					{
-						headers: {
-							Authorization: `Bearer ${apiToken}`,
-						},
-					}
-				),
+				flyClient.Machines_create({ app_name: config.appName }, request, {
+					headers: {
+						Authorization: `Bearer ${apiToken}`,
+					},
+				}),
 			catch: (e) => {
 				if (
 					e &&
@@ -130,17 +120,13 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 					return {
 						_tag: "HttpError",
 						status: e.response.status as number,
-						body:
-							typeof e.response.data === "string"
-								? e.response.data
-								: JSON.stringify(e.response.data),
+						body: typeof e.response.data === "string" ? e.response.data : JSON.stringify(e.response.data),
 					} as FlyApiError;
 				}
 				return {
 					_tag: "HttpError",
 					status: 0,
-					body:
-						typeof e === "string" ? e : "Network error",
+					body: typeof e === "string" ? e : "Network error",
 				} as FlyApiError;
 			},
 		});
@@ -156,10 +142,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 	});
 
 // Get machine status
-const getMachineStatus = (
-	machineId: string,
-	apiToken: string
-) =>
+const getMachineStatus = (machineId: string, apiToken: string) =>
 	Effect.gen(function* () {
 		const config = yield* FlyConfigService;
 
@@ -175,7 +158,7 @@ const getMachineStatus = (
 						headers: {
 							Authorization: `Bearer ${apiToken}`,
 						},
-					}
+					},
 				),
 			catch: (e) => {
 				if (
@@ -190,17 +173,13 @@ const getMachineStatus = (
 					return {
 						_tag: "HttpError",
 						status: e.response.status as number,
-						body:
-							typeof e.response.data === "string"
-								? e.response.data
-								: JSON.stringify(e.response.data),
+						body: typeof e.response.data === "string" ? e.response.data : JSON.stringify(e.response.data),
 					} as FlyApiError;
 				}
 				return {
 					_tag: "HttpError",
 					status: 0,
-					body:
-						typeof e === "string" ? e : "Network error",
+					body: typeof e === "string" ? e : "Network error",
 				} as FlyApiError;
 			},
 		});
@@ -216,10 +195,7 @@ const getMachineStatus = (
 	});
 
 // Wait for machine to complete
-const waitForCompletion = (
-	machineId: string,
-	apiToken: string
-) =>
+const waitForCompletion = (machineId: string, apiToken: string) =>
 	Effect.gen(function* () {
 		let attempts = 0;
 		const maxAttempts = 120;
@@ -227,10 +203,7 @@ const waitForCompletion = (
 		while (attempts < maxAttempts) {
 			const status = yield* getMachineStatus(machineId, apiToken);
 
-			if (
-				status.state === "stopped" ||
-				status.state === "destroyed"
-			) {
+			if (status.state === "stopped" || status.state === "destroyed") {
 				return status;
 			}
 
@@ -246,7 +219,6 @@ const waitForCompletion = (
 // Complete job execution flow
 export const executeTranscodeJob = (job: TranscodeJob) =>
 	Effect.gen(function* () {
-
 		// Create and start machine
 		const machine = yield* createTranscodeMachine(job);
 		yield* Effect.log(`Machine created: ${machine.id}`);
@@ -257,4 +229,3 @@ export const executeTranscodeJob = (job: TranscodeJob) =>
 
 		return completed;
 	});
-

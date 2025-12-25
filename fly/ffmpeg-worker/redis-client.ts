@@ -20,18 +20,13 @@ export type RedisError =
 // Redis Service
 // =============================================================================
 
-export class RedisService extends Context.Tag("RedisService")<
-	RedisService,
-	{ readonly client: Redis }
->() {}
+export class RedisService extends Context.Tag("RedisService")<RedisService, { readonly client: Redis }>() {}
 
 // =============================================================================
 // Helper to wrap Redis operations
 // =============================================================================
 
-export const redisEffect = <T>(
-	operation: (redis: Redis) => Promise<T>
-): Effect.Effect<T, RedisError, RedisService> =>
+export const redisEffect = <T>(operation: (redis: Redis) => Promise<T>): Effect.Effect<T, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 		return yield* Effect.tryPromise({
@@ -54,12 +49,9 @@ export const makeRedisLayer = Layer.effect(
 		const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
 		if (!url || !token) {
-			throw new Error(
-				"Missing: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN"
-			);
+			throw new Error("Missing: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN");
 		}
 
 		return { client: new Redis({ url, token }) };
-	})
+	}),
 );
-

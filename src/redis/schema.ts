@@ -185,9 +185,7 @@ export const serializeJobData = (job: JobData): Record<string, string> => ({
 	...(job.r2Config && { r2Config: JSON.stringify(job.r2Config) }),
 });
 
-export const deserializeJobData = (
-	data: Record<string, string | null>
-): JobData | null => {
+export const deserializeJobData = (data: Record<string, string | null>): JobData | null => {
 	if (!data.jobId) {
 		return null;
 	}
@@ -201,9 +199,7 @@ export const deserializeJobData = (
 		outputUrl: data.outputUrl || "",
 		preset: data.preset || "default",
 		webhookUrl: data.webhookUrl || "",
-		outputQualities: data.outputQualities
-			? data.outputQualities.split(",")
-			: undefined,
+		outputQualities: data.outputQualities ? data.outputQualities.split(",") : undefined,
 		outputs: data.outputs ? JSON.parse(data.outputs) : undefined,
 		filename: data.filename || undefined,
 		contentType: data.contentType || undefined,
@@ -220,9 +216,7 @@ export const deserializeJobData = (
 	};
 };
 
-export const serializeWorkerLease = (
-	lease: WorkerLease
-): Record<string, string> => ({
+export const serializeWorkerLease = (lease: WorkerLease): Record<string, string> => ({
 	machineId: lease.machineId,
 	expiresAt: String(lease.expiresAt),
 	startedAt: String(lease.startedAt),
@@ -231,9 +225,7 @@ export const serializeWorkerLease = (
 	maxLifetimeMs: String(lease.maxLifetimeMs),
 });
 
-export const deserializeWorkerLease = (
-	data: Record<string, string | null>
-): WorkerLease | null => {
+export const deserializeWorkerLease = (data: Record<string, string | null>): WorkerLease | null => {
 	if (!data.machineId || !data.expiresAt) {
 		return null;
 	}

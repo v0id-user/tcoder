@@ -7,14 +7,7 @@
 
 import { Effect } from "effect";
 import { RedisService, redisEffect, type RedisError } from "../redis/client";
-import {
-	RedisKeys,
-	RWOS_CONFIG,
-	type JobData,
-	type JobOutput,
-	serializeJobData,
-	deserializeJobData,
-} from "../redis/schema";
+import { RedisKeys, RWOS_CONFIG, type JobData, type JobOutput, serializeJobData, deserializeJobData } from "../redis/schema";
 
 // =============================================================================
 // Job Manager Error Types
@@ -35,7 +28,7 @@ export type JobManagerError =
 export const enqueueJob = (
 	job: Omit<JobData, "status" | "timestamps" | "retries"> & {
 		timestamps?: Partial<JobData["timestamps"]>;
-	}
+	},
 ): Effect.Effect<JobData, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
@@ -60,10 +53,7 @@ export const enqueueJob = (
 				const pipe = client.pipeline();
 				pipe.zadd(RedisKeys.jobsPending, { score, member: job.jobId });
 				pipe.hset(RedisKeys.jobStatus(job.jobId), serialized);
-				pipe.expire(
-					RedisKeys.jobStatus(job.jobId),
-					RWOS_CONFIG.JOB_STATUS_TTL_SECONDS
-				);
+				pipe.expire(RedisKeys.jobStatus(job.jobId), RWOS_CONFIG.JOB_STATUS_TTL_SECONDS);
 				await pipe.exec();
 			},
 			catch: (e) => ({
@@ -78,9 +68,7 @@ export const enqueueJob = (
 /**
  * Atomically pop a job from the queue and mark it as running.
  */
-export const popJob = (
-	machineId: string
-): Effect.Effect<JobData | null, JobManagerError, RedisService> =>
+export const popJob = (machineId: string): Effect.Effect<JobData | null, JobManagerError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 
@@ -96,10 +84,7 @@ export const popJob = (
 			return null;
 		}
 
-		const jobId =
-			typeof popped[0] === "object" && "member" in popped[0]
-				? (popped[0] as { member: string }).member
-				: (popped[0] as string);
+		const jobId = typeof popped[0] === "object" && "member" in popped[0] ? (popped[0] as { member: string }).member : (popped[0] as string);
 
 		const now = Date.now();
 
@@ -150,7 +135,7 @@ export const popJob = (
  */
 export const completeJob = (
 	jobId: string,
-	result?: { outputs?: JobOutput[]; duration?: number }
+	result?: { outputs?: JobOutput[]; duration?: number },
 ): Effect.Effect<void, RedisError, RedisService> =>
 	redisEffect(async (client) => {
 		const pipe = client.pipeline();
@@ -167,10 +152,7 @@ export const completeJob = (
 /**
  * Mark a job as failed.
  */
-export const failJob = (
-	jobId: string,
-	error: string
-): Effect.Effect<void, RedisError, RedisService> =>
+export const failJob = (jobId: string, error: string): Effect.Effect<void, RedisError, RedisService> =>
 	redisEffect(async (client) => {
 		const pipe = client.pipeline();
 		pipe.hset(RedisKeys.jobStatus(jobId), {
@@ -185,15 +167,12 @@ export const failJob = (
 /**
  * Requeue a job (for retry after failure).
  */
-export const requeueJob = (
-	jobId: string
-): Effect.Effect<boolean, JobManagerError, RedisService> =>
+export const requeueJob = (jobId: string): Effect.Effect<boolean, JobManagerError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 
 		const jobData = yield* Effect.tryPromise({
-			try: () =>
-				client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId)),
+			try: () => client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId)),
 			catch: (e) => ({
 				_tag: "CommandError" as const,
 				reason: e instanceof Error ? e.message : String(e),
@@ -234,36 +213,23 @@ export const requeueJob = (
 /**
  * Get job status by ID.
  */
-export const getJobStatus = (
-	jobId: string
-): Effect.Effect<JobData | null, RedisError, RedisService> =>
+export const getJobStatus = (jobId: string): Effect.Effect<JobData | null, RedisError, RedisService> =>
 	Effect.gen(function* () {
-		const data = yield* redisEffect((client) =>
-			client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId))
-		);
+		const data = yield* redisEffect((client) => client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId)));
 		return data ? deserializeJobData(data) : null;
 	});
 
 /**
  * Get pending queue length.
  */
-export const getPendingCount = (): Effect.Effect<
-	number,
-	RedisError,
-	RedisService
-> => redisEffect((client) => client.zcard(RedisKeys.jobsPending));
+export const getPendingCount = (): Effect.Effect<number, RedisError, RedisService> =>
+	redisEffect((client) => client.zcard(RedisKeys.jobsPending));
 
 /**
  * Get all active jobs.
  */
-export const getActiveJobs = (): Effect.Effect<
-	Record<string, string>,
-	RedisError,
-	RedisService
-> =>
+export const getActiveJobs = (): Effect.Effect<Record<string, string>, RedisError, RedisService> =>
 	redisEffect(async (client) => {
-		const result = await client.hgetall<Record<string, string>>(
-			RedisKeys.jobsActive
-		);
+		const result = await client.hgetall<Record<string, string>>(RedisKeys.jobsActive);
 		return result || {};
 	});

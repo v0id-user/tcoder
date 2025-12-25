@@ -13,12 +13,7 @@ import { makeRedisLayer, type RedisEnv } from "../redis/client";
 import { RedisKeys, RWOS_CONFIG, serializeJobData, deserializeJobData, type JobData } from "../redis/schema";
 import { getAdmissionStats } from "../orchestration/admission";
 import { maybeSpawnWorker, type SpawnConfig } from "../orchestration/spawner";
-import {
-	createR2Client,
-	generateUploadUrl,
-	generateInputKey,
-	type R2Config,
-} from "../r2/presigned";
+import { createR2Client, generateUploadUrl, generateInputKey, type R2Config } from "../r2/presigned";
 
 // =============================================================================
 // Request Schemas
@@ -134,7 +129,7 @@ export const createRoutes = () => {
 				expiresAt: presigned.expiresAt,
 				inputKey,
 			},
-			201
+			201,
 		);
 	});
 
@@ -187,8 +182,8 @@ export const createRoutes = () => {
 		const spawned = await Effect.runPromise(
 			maybeSpawnWorker(spawnConfig).pipe(
 				Effect.catchAll(() => Effect.succeed(null)),
-				Effect.provide(redisLayer)
-			)
+				Effect.provide(redisLayer),
+			),
 		);
 
 		return c.json(
@@ -198,7 +193,7 @@ export const createRoutes = () => {
 				machineId: spawned?.machineId || null,
 				queuedAt: now,
 			},
-			201
+			201,
 		);
 	});
 
@@ -244,7 +239,7 @@ export const createRoutes = () => {
 			Effect.gen(function* () {
 				const admission = yield* getAdmissionStats();
 				return admission;
-			}).pipe(Effect.provide(redisLayer))
+			}).pipe(Effect.provide(redisLayer)),
 		);
 
 		// Get queue stats
@@ -275,7 +270,7 @@ const webhookPayloadSchema = z.object({
 			quality: z.string(),
 			url: z.string(),
 			preset: z.string(),
-		})
+		}),
 	),
 	error: z.string().optional(),
 	duration: z.number().optional(),
@@ -303,7 +298,7 @@ export const createWebhookRoutes = () => {
 				payload.outputs.map((o) => ({
 					quality: o.quality,
 					url: o.url,
-				}))
+				})),
 			);
 		}
 

@@ -31,9 +31,7 @@ export interface WebhookPayload {
 export class WebhookClientService extends Context.Tag("WebhookClientService")<
 	WebhookClientService,
 	{
-		notify: (
-			payload: WebhookPayload
-		) => Effect.Effect<void, WebhookError, never>;
+		notify: (payload: WebhookPayload) => Effect.Effect<void, WebhookError, never>;
 	}
 >() {}
 
@@ -54,70 +52,62 @@ const getWebhookUrl = Effect.sync((): string => {
 
 // Mock webhook notification implementation
 // TODO: Replace with actual HTTP client
-const sendWebhook = (
-	payload: WebhookPayload
-): Effect.Effect<void, WebhookError, never> =>
+const sendWebhook = (payload: WebhookPayload): Effect.Effect<void, WebhookError, never> =>
 	pipe(
 		Effect.gen(function* () {
-		const webhookUrl = yield* getWebhookUrl;
+			const webhookUrl = yield* getWebhookUrl;
 
-		yield* Console.log(
-			`[Webhook] Sending notification to ${webhookUrl}`
-		);
-		yield* Console.log(`[Webhook] Payload: ${JSON.stringify(payload, null, 2)}`);
+			yield* Console.log(`[Webhook] Sending notification to ${webhookUrl}`);
+			yield* Console.log(`[Webhook] Payload: ${JSON.stringify(payload, null, 2)}`);
 
-		// TODO: Implement actual HTTP POST with Effect HTTP client
-		// For now, use fetch wrapped in Effect
-		const response = yield* Effect.tryPromise({
-			try: async () => {
-				const res = await fetch(webhookUrl, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						// TODO: Add authentication header if needed
-						// "Authorization": `Bearer ${process.env.WEBHOOK_SECRET}`,
-					},
-					body: JSON.stringify(payload),
-				});
+			// TODO: Implement actual HTTP POST with Effect HTTP client
+			// For now, use fetch wrapped in Effect
+			const response = yield* Effect.tryPromise({
+				try: async () => {
+					const res = await fetch(webhookUrl, {
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+							// TODO: Add authentication header if needed
+							// "Authorization": `Bearer ${process.env.WEBHOOK_SECRET}`,
+						},
+						body: JSON.stringify(payload),
+					});
 
-				if (!res.ok) {
-					const body = await res.text().catch(() => "");
-					throw new Error(
-						`HTTP ${res.status}: ${res.statusText}\n${body}`
-					);
-				}
+					if (!res.ok) {
+						const body = await res.text().catch(() => "");
+						throw new Error(`HTTP ${res.status}: ${res.statusText}\n${body}`);
+					}
 
-				return res;
-			},
-			catch: (error) => {
-				if (error instanceof Error) {
-					if (error.message.includes("HTTP")) {
-						const match = error.message.match(/HTTP (\d+):/);
-						const status = match ? parseInt(match[1], 10) : 0;
+					return res;
+				},
+				catch: (error) => {
+					if (error instanceof Error) {
+						if (error.message.includes("HTTP")) {
+							const match = error.message.match(/HTTP (\d+):/);
+							const status = match ? parseInt(match[1], 10) : 0;
+							return {
+								_tag: "WebhookFailed",
+								url: webhookUrl,
+								status,
+								body: error.message,
+							} as WebhookError;
+						}
 						return {
-							_tag: "WebhookFailed",
-							url: webhookUrl,
-							status,
-							body: error.message,
+							_tag: "NetworkError",
+							reason: error.message,
 						} as WebhookError;
 					}
 					return {
 						_tag: "NetworkError",
-						reason: error.message,
+						reason: String(error),
 					} as WebhookError;
-				}
-				return {
-					_tag: "NetworkError",
-					reason: String(error),
-				} as WebhookError;
-			},
-		});
+				},
+			});
 
-		yield* Console.log(
-			`[Webhook] Notification sent successfully (${response.status})`
-		);
+			yield* Console.log(`[Webhook] Notification sent successfully (${response.status})`);
 		}),
-		Effect.asVoid
+		Effect.asVoid,
 	);
 
 // Create Webhook Client Service Layer
@@ -127,6 +117,5 @@ export const makeWebhookClientLayer = Layer.effect(
 		return {
 			notify: (payload: WebhookPayload) => sendWebhook(payload),
 		};
-	})
+	}),
 );
-

@@ -1,0 +1,24 @@
+{
+	"$schema": "https://unpkg.com/knip@latest/schema.json",
+	"entry": ["src/index.ts", "test/index.spec.ts"],
+	"project": ["src/**/*.ts", "test/**/*.ts"],
+	"ignore": [
+		"**/*.d.ts",
+		"**/*.spec.ts",
+		"**/*.test.ts",
+		"worker-configuration.d.ts",
+		"wrangler.jsonc",
+		"vitest.config.mts",
+		"tsconfig.json",
+		".wrangler/**",
+		"dist/**",
+		"build/**"
+	],
+	"workspaces": {
+		"fly": {
+			"entry": ["ffmpeg-worker/worker.ts", "machines.ts"],
+			"project": ["**/*.ts"],
+			"ignore": ["**/*.d.ts", "spec.json", "fly.toml", "Dockerfile", "fly-machine-apis.d.ts"]
+		}
+	}
+}

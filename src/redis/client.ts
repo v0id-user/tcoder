@@ -29,18 +29,13 @@ export type RedisError =
 // Redis Service - Exposes the Upstash client
 // =============================================================================
 
-export class RedisService extends Context.Tag("RedisService")<
-	RedisService,
-	{ readonly client: Redis }
->() {}
+export class RedisService extends Context.Tag("RedisService")<RedisService, { readonly client: Redis }>() {}
 
 // =============================================================================
 // Helper to wrap Redis operations in Effect
 // =============================================================================
 
-export const redisEffect = <T>(
-	operation: (redis: Redis) => Promise<T>
-): Effect.Effect<T, RedisError, RedisService> =>
+export const redisEffect = <T>(operation: (redis: Redis) => Promise<T>): Effect.Effect<T, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 		return yield* Effect.tryPromise({

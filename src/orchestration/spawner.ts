@@ -61,10 +61,7 @@ interface MachineConfig {
 /**
  * Create a Fly Machine via REST API with retry.
  */
-const createMachine = (
-	config: SpawnConfig,
-	machineConfig: MachineConfig
-): Effect.Effect<SpawnResult, SpawnerError, never> =>
+const createMachine = (config: SpawnConfig, machineConfig: MachineConfig): Effect.Effect<SpawnResult, SpawnerError, never> =>
 	Effect.gen(function* () {
 		const url = `${FLY_API_BASE}/apps/${config.flyAppName}/machines`;
 
@@ -116,10 +113,7 @@ const createMachine = (
  */
 const retrySchedule = Schedule.exponential(RWOS_CONFIG.BACKOFF_BASE_MS).pipe(
 	Schedule.intersect(Schedule.recurs(5)),
-	Schedule.whileInput<SpawnerError>(
-		(err) =>
-			err._tag === "FlyApiError" && (err.status === 429 || err.status >= 500)
-	)
+	Schedule.whileInput<SpawnerError>((err) => err._tag === "FlyApiError" && (err.status === 429 || err.status >= 500)),
 );
 
 // =============================================================================
@@ -130,9 +124,7 @@ const retrySchedule = Schedule.exponential(RWOS_CONFIG.BACKOFF_BASE_MS).pipe(
  * Spawn a new Fly Machine worker.
  * Handles admission control, retry with backoff, and env injection.
  */
-export const spawnWorker = (
-	config: SpawnConfig
-): Effect.Effect<SpawnResult, SpawnerError, RedisService> =>
+export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, SpawnerError, RedisService> =>
 	Effect.gen(function* () {
 		// Check admission (rate limit + capacity)
 		const slot = yield* acquireMachineSlot();
@@ -179,8 +171,8 @@ export const spawnWorker = (
 					// Release slot on failure
 					yield* releaseMachineSlot();
 					return yield* Effect.fail(err);
-				})
-			)
+				}),
+			),
 		);
 
 		yield* Console.log(`[Spawner] Created machine ${result.machineId}`);
@@ -212,9 +204,7 @@ export const spawnWorker = (
  * Check if we should spawn a new worker.
  * Called when a new job is enqueued.
  */
-export const maybeSpawnWorker = (
-	config: SpawnConfig
-): Effect.Effect<SpawnResult | null, SpawnerError, RedisService> =>
+export const maybeSpawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult | null, SpawnerError, RedisService> =>
 	Effect.gen(function* () {
 		// Quick capacity check without reserving
 		const { client } = yield* RedisService;
@@ -236,8 +226,5 @@ export const maybeSpawnWorker = (
 		}
 
 		// Try to spawn
-		return yield* spawnWorker(config).pipe(
-			Effect.catchTag("CapacityFull", () => Effect.succeed(null))
-		);
+		return yield* spawnWorker(config).pipe(Effect.catchTag("CapacityFull", () => Effect.succeed(null)));
 	});
-

@@ -1,0 +1,6 @@
+{
+	"$schema": "https://unpkg.com/knip@latest/schema.json",
+	"entry": ["ffmpeg-worker/worker.ts", "machines.ts"],
+	"project": ["**/*.ts"],
+	"ignore": ["**/*.d.ts", "spec.json", "fly.toml", "Dockerfile", "fly-machine-apis.d.ts", "fly-client.ts"]
+}

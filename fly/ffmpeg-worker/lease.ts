@@ -66,14 +66,12 @@ export interface WorkerState {
 
 /**
  * Verify and activate a lease for this worker machine.
- * 
+ *
  * The spawner registers a lease with status "starting" when creating the machine.
  * This function verifies the lease exists and activates it for processing.
  * Falls back to creating a new lease if none exists (local dev / edge cases).
  */
-export const verifyAndActivateLease = (
-	machineId: string
-): Effect.Effect<WorkerLease, RedisError, RedisService> =>
+export const verifyAndActivateLease = (machineId: string): Effect.Effect<WorkerLease, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 
@@ -112,10 +110,7 @@ export const verifyAndActivateLease = (
 				status: "active",
 			});
 			// Set TTL on worker meta
-			pipe.expire(
-				RedisKeys.workerMeta(machineId),
-				Math.ceil((LEASE_CONFIG.MACHINE_TTL_MS + LEASE_CONFIG.LEASE_BUFFER_MS) / 1000)
-			);
+			pipe.expire(RedisKeys.workerMeta(machineId), Math.ceil((LEASE_CONFIG.MACHINE_TTL_MS + LEASE_CONFIG.LEASE_BUFFER_MS) / 1000));
 			await pipe.exec();
 		});
 
@@ -136,16 +131,11 @@ export const verifyAndActivateLease = (
 /**
  * Extend lease expiry (heartbeat).
  */
-export const extendLease = (
-	machineId: string,
-	extensionMs: number
-): Effect.Effect<void, RedisError, RedisService> =>
+export const extendLease = (machineId: string, extensionMs: number): Effect.Effect<void, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const newExpiry = Date.now() + extensionMs + LEASE_CONFIG.LEASE_BUFFER_MS;
 
-		yield* redisEffect((client) =>
-			client.hset(RedisKeys.workersLeases, { [machineId]: String(newExpiry) })
-		);
+		yield* redisEffect((client) => client.hset(RedisKeys.workersLeases, { [machineId]: String(newExpiry) }));
 
 		yield* Console.log(`[Lease] Extended to ${new Date(newExpiry).toISOString()}`);
 	});
@@ -153,36 +143,27 @@ export const extendLease = (
 /**
  * Update jobs processed count.
  */
-export const updateJobsProcessed = (
-	machineId: string,
-	count: number
-): Effect.Effect<void, RedisError, RedisService> =>
+export const updateJobsProcessed = (machineId: string, count: number): Effect.Effect<void, RedisError, RedisService> =>
 	redisEffect((client) =>
 		client.hset(RedisKeys.workerMeta(machineId), {
 			jobsProcessed: String(count),
 			lastJobAt: String(Date.now()),
-		})
+		}),
 	);
 
 /**
  * Set worker to draining status.
  */
-export const setDraining = (
-	machineId: string
-): Effect.Effect<void, RedisError, RedisService> =>
+export const setDraining = (machineId: string): Effect.Effect<void, RedisError, RedisService> =>
 	Effect.gen(function* () {
-		yield* redisEffect((client) =>
-			client.hset(RedisKeys.workerMeta(machineId), { status: "draining" })
-		);
+		yield* redisEffect((client) => client.hset(RedisKeys.workerMeta(machineId), { status: "draining" }));
 		yield* Console.log(`[Lease] Worker ${machineId} entering drain mode`);
 	});
 
 /**
  * Release lease and cleanup (called on graceful exit).
  */
-export const releaseLease = (
-	machineId: string
-): Effect.Effect<void, RedisError, RedisService> =>
+export const releaseLease = (machineId: string): Effect.Effect<void, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		yield* redisEffect(async (client) => {
 			const pipe = client.pipeline();
@@ -202,18 +183,13 @@ export const shouldDrain = (state: WorkerState): boolean => {
 	const elapsed = Date.now() - state.startTime;
 	const remaining = LEASE_CONFIG.MACHINE_TTL_MS - elapsed;
 
-	return (
-		remaining < LEASE_CONFIG.DRAIN_BUFFER_MS ||
-		state.jobsProcessed >= LEASE_CONFIG.MAX_JOBS
-	);
+	return remaining < LEASE_CONFIG.DRAIN_BUFFER_MS || state.jobsProcessed >= LEASE_CONFIG.MAX_JOBS;
 };
 
 /**
  * Pop a job from the queue atomically.
  */
-export const popJob = (
-	machineId: string
-): Effect.Effect<string | null, RedisError, RedisService> =>
+export const popJob = (machineId: string): Effect.Effect<string | null, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 
@@ -230,10 +206,7 @@ export const popJob = (
 		}
 
 		// Extract job ID from result
-		const jobId =
-			typeof popped[0] === "object" && "member" in popped[0]
-				? (popped[0] as { member: string }).member
-				: (popped[0] as string);
+		const jobId = typeof popped[0] === "object" && "member" in popped[0] ? (popped[0] as { member: string }).member : (popped[0] as string);
 
 		// Mark job as running
 		yield* redisEffect(async (client) => {
@@ -253,23 +226,16 @@ export const popJob = (
 /**
  * Get job data by ID.
  */
-export const getJobData = (
-	jobId: string
-): Effect.Effect<Record<string, string> | null, RedisError, RedisService> =>
+export const getJobData = (jobId: string): Effect.Effect<Record<string, string> | null, RedisError, RedisService> =>
 	redisEffect(async (client) => {
-		const data = await client.hgetall<Record<string, string>>(
-			RedisKeys.jobStatus(jobId)
-		);
+		const data = await client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId));
 		return data || null;
 	});
 
 /**
  * Mark job as completed.
  */
-export const completeJob = (
-	jobId: string,
-	duration: number
-): Effect.Effect<void, RedisError, RedisService> =>
+export const completeJob = (jobId: string, duration: number): Effect.Effect<void, RedisError, RedisService> =>
 	redisEffect(async (client) => {
 		const pipe = client.pipeline();
 		pipe.hset(RedisKeys.jobStatus(jobId), {
@@ -284,10 +250,7 @@ export const completeJob = (
 /**
  * Mark job as failed.
  */
-export const failJob = (
-	jobId: string,
-	error: string
-): Effect.Effect<void, RedisError, RedisService> =>
+export const failJob = (jobId: string, error: string): Effect.Effect<void, RedisError, RedisService> =>
 	redisEffect(async (client) => {
 		const pipe = client.pipeline();
 		pipe.hset(RedisKeys.jobStatus(jobId), {
@@ -298,4 +261,3 @@ export const failJob = (
 		pipe.hdel(RedisKeys.jobsActive, jobId);
 		await pipe.exec();
 	});
-

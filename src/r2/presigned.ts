@@ -60,7 +60,7 @@ export const generateUploadUrl = async (
 	options: {
 		expiresIn?: number; // seconds, default 1 hour
 		contentType?: string;
-	} = {}
+	} = {},
 ): Promise<PresignedUploadResult> => {
 	const expiresIn = options.expiresIn || 3600;
 
@@ -86,7 +86,7 @@ export const generateDownloadUrl = async (
 	client: S3Client,
 	bucketName: string,
 	key: string,
-	expiresIn: number = 3600
+	expiresIn: number = 3600,
 ): Promise<PresignedDownloadResult> => {
 	const command = new GetObjectCommand({
 		Bucket: bucketName,
@@ -119,11 +119,7 @@ export const generateInputKey = (jobId: string, filename: string): string => {
  * Generate output key pattern for a job.
  * Format: outputs/{jobId}/{quality}.{ext}
  */
-export const generateOutputKey = (
-	jobId: string,
-	quality: string,
-	ext: string = "mp4"
-): string => {
+export const generateOutputKey = (jobId: string, quality: string, ext: string = "mp4"): string => {
 	return `outputs/${jobId}/${quality}.${ext}`;
 };
 
@@ -135,4 +131,3 @@ export const extractJobIdFromKey = (key: string): string | null => {
 	const match = key.match(/^(?:inputs|outputs)\/([^/]+)\//);
 	return match ? match[1] : null;
 };
-

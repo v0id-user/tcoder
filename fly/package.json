@@ -13,10 +13,18 @@
 		"machines:list": "fly machines list",
 		"machines:destroy-all": "fly machines list --json | jq -r '.[].id' | xargs -I {} fly machine destroy {} --force",
 
-		"test:local": "docker build -t fly-ffmpeg-test . && docker run --rm --env-file ../.env fly-ffmpeg-test"
+		"test:local": "docker build -t fly-ffmpeg-test . && docker run --rm --env-file ../.env fly-ffmpeg-test",
+
+		"format": "biome format .",
+		"format:check": "biome format .",
+		"format:write": "biome format --write .",
+		"knip": "knip",
+		"knip:fix": "knip --fix"
 	},
 	"devDependencies": {
-		"@types/bun": "latest"
+		"@biomejs/biome": "^1.9.4",
+		"@types/bun": "latest",
+		"knip": "^5.50.0"
 	},
 	"peerDependencies": {
 		"typescript": "^5"

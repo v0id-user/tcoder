@@ -30,15 +30,8 @@ interface R2Config {
 export class R2ClientService extends Context.Tag("R2ClientService")<
 	R2ClientService,
 	{
-		download: (
-			url: string,
-			localPath: string
-		) => Effect.Effect<void, R2Error, never>;
-		upload: (
-			localPath: string,
-			r2Key: string,
-			metadata?: Record<string, string>
-		) => Effect.Effect<string, R2Error, never>; // Returns R2 URL
+		download: (url: string, localPath: string) => Effect.Effect<void, R2Error, never>;
+		upload: (localPath: string, r2Key: string, metadata?: Record<string, string>) => Effect.Effect<string, R2Error, never>; // Returns R2 URL
 	}
 >() {}
 
@@ -58,9 +51,7 @@ const getR2Config = Effect.sync((): R2Config => {
 	const endpoint = process.env.R2_ENDPOINT;
 
 	if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
-		throw new Error(
-			"Missing R2 configuration: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME"
-		);
+		throw new Error("Missing R2 configuration: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME");
 	}
 
 	return {
@@ -74,91 +65,71 @@ const getR2Config = Effect.sync((): R2Config => {
 
 // Mock download implementation
 // TODO: Replace with actual R2 SDK download
-const downloadFromR2 = (
-	url: string,
-	localPath: string
-): Effect.Effect<void, R2Error, never> =>
+const downloadFromR2 = (url: string, localPath: string): Effect.Effect<void, R2Error, never> =>
 	pipe(
 		Effect.gen(function* () {
-		yield* Console.log(`[R2] Downloading from ${url} to ${localPath}`);
+			yield* Console.log(`[R2] Downloading from ${url} to ${localPath}`);
 
-		// Check if URL is a presigned URL or direct R2 URL
-		const isPresignedUrl = url.includes("?");
-		const isDirectR2Url = url.includes("r2.cloudflarestorage.com");
+			// Check if URL is a presigned URL or direct R2 URL
+			const isPresignedUrl = url.includes("?");
+			const isDirectR2Url = url.includes("r2.cloudflarestorage.com");
 
-		if (isPresignedUrl || isDirectR2Url) {
-			// Download via HTTP fetch (presigned URL or public URL)
-			const response = yield* Effect.tryPromise({
-				try: async () => {
-					const res = await fetch(url);
-					if (!res.ok) {
-						throw new Error(
-							`HTTP ${res.status}: ${res.statusText}`
-						);
-					}
-					return res;
-				},
-				catch: (error) =>
-					({
-						_tag: "DownloadFailed",
-						url,
-						reason:
-							error instanceof Error
-								? error.message
-								: String(error),
-					} as R2Error),
-			});
+			if (isPresignedUrl || isDirectR2Url) {
+				// Download via HTTP fetch (presigned URL or public URL)
+				const response = yield* Effect.tryPromise({
+					try: async () => {
+						const res = await fetch(url);
+						if (!res.ok) {
+							throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+						}
+						return res;
+					},
+					catch: (error) =>
+						({
+							_tag: "DownloadFailed",
+							url,
+							reason: error instanceof Error ? error.message : String(error),
+						}) as R2Error,
+				});
 
-			const arrayBuffer = yield* Effect.tryPromise({
-				try: () => response.arrayBuffer(),
-				catch: (error) =>
-					({
-						_tag: "DownloadFailed",
-						url,
-						reason:
-							error instanceof Error
-								? error.message
-								: String(error),
-					} as R2Error),
-			});
+				const arrayBuffer = yield* Effect.tryPromise({
+					try: () => response.arrayBuffer(),
+					catch: (error) =>
+						({
+							_tag: "DownloadFailed",
+							url,
+							reason: error instanceof Error ? error.message : String(error),
+						}) as R2Error,
+				});
 
-			yield* Effect.tryPromise({
-				try: () => writeFile(localPath, Buffer.from(arrayBuffer)),
-				catch: (error) =>
-					({
-						_tag: "DownloadFailed",
-						url,
-						reason:
-							error instanceof Error
-								? error.message
-								: String(error),
-					} as R2Error),
-			});
+				yield* Effect.tryPromise({
+					try: () => writeFile(localPath, Buffer.from(arrayBuffer)),
+					catch: (error) =>
+						({
+							_tag: "DownloadFailed",
+							url,
+							reason: error instanceof Error ? error.message : String(error),
+						}) as R2Error,
+				});
 
-			yield* Console.log(`[R2] Download completed: ${localPath}`);
-		} else {
-			// TODO: Implement direct bucket access using R2 SDK
-			// For now, treat as local file path (fallback for testing)
-			yield* Console.log(
-				`[R2] WARNING: Treating as local path (not implemented): ${url}`
-			);
-			return yield* Effect.fail({
-				_tag: "DownloadFailed",
-				url,
-				reason: "Direct bucket access not yet implemented",
-			} as R2Error);
-		}
+				yield* Console.log(`[R2] Download completed: ${localPath}`);
+			} else {
+				// TODO: Implement direct bucket access using R2 SDK
+				// For now, treat as local file path (fallback for testing)
+				yield* Console.log(`[R2] WARNING: Treating as local path (not implemented): ${url}`);
+				return yield* Effect.fail({
+					_tag: "DownloadFailed",
+					url,
+					reason: "Direct bucket access not yet implemented",
+				} as R2Error);
+			}
 		}),
-		Effect.asVoid
+		Effect.asVoid,
 	);
 
 // Mock upload implementation
 // TODO: Replace with actual R2 SDK upload
-const uploadToR2 = (
-	localPath: string,
-	r2Key: string,
-	metadata?: Record<string, string>
-) =>
+const uploadToR2 = (localPath: string, r2Key: string, metadata?: Record<string, string>) =>
 	Effect.gen(function* () {
 		yield* Console.log(`[R2] Uploading ${localPath} to R2 key: ${r2Key}`);
 
@@ -169,12 +140,10 @@ const uploadToR2 = (
 				({
 					_tag: "FileNotFound",
 					path: localPath,
-				} as R2Error),
+				}) as R2Error,
 		});
 
-		yield* Console.log(
-			`[R2] File size: ${(fileStats.size / 1024 / 1024).toFixed(2)} MB`
-		);
+		yield* Console.log(`[R2] File size: ${(fileStats.size / 1024 / 1024).toFixed(2)} MB`);
 
 		// TODO: Implement actual R2 SDK upload
 		// const config = yield* getR2Config;
@@ -200,17 +169,14 @@ export const makeR2ClientLayer = Layer.effect(
 		const config = yield* getR2Config;
 
 		return {
-			download: (url: string, localPath: string) =>
-				downloadFromR2(url, localPath),
-			upload: (localPath: string, r2Key: string, metadata?: Record<string, string>) =>
-				uploadToR2(localPath, r2Key, metadata),
+			download: (url: string, localPath: string) => downloadFromR2(url, localPath),
+			upload: (localPath: string, r2Key: string, metadata?: Record<string, string>) => uploadToR2(localPath, r2Key, metadata),
 		};
-	})
+	}),
 );
 
 // Helper: Get temporary file path
-export const getTempFilePath = (jobId: string, suffix: string) =>
-	join(tmpdir(), `ffmpeg-${jobId}-${suffix}`);
+export const getTempFilePath = (jobId: string, suffix: string) => join(tmpdir(), `ffmpeg-${jobId}-${suffix}`);
 
 // Helper: Extract R2 key from URL
 export const extractR2Key = (url: string): string => {
@@ -223,4 +189,3 @@ export const extractR2Key = (url: string): string => {
 		return url;
 	}
 };
-

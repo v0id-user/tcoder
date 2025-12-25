@@ -26,11 +26,7 @@ export type AdmissionError =
  * Check rate limit for Fly API calls (1 req/sec).
  * Returns true if allowed, false if rate limited.
  */
-export const checkRateLimit = (): Effect.Effect<
-	boolean,
-	RedisError,
-	RedisService
-> =>
+export const checkRateLimit = (): Effect.Effect<boolean, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 
@@ -55,11 +51,7 @@ export const checkRateLimit = (): Effect.Effect<
 /**
  * Wait for rate limit slot (blocking with retry).
  */
-export const waitForRateLimit = (): Effect.Effect<
-	void,
-	RedisError,
-	RedisService
-> =>
+export const waitForRateLimit = (): Effect.Effect<void, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		let allowed = yield* checkRateLimit();
 
@@ -72,15 +64,9 @@ export const waitForRateLimit = (): Effect.Effect<
 /**
  * Check if we have capacity to create a new machine.
  */
-export const checkCapacity = (): Effect.Effect<
-	{ allowed: boolean; currentMachines: number },
-	RedisError,
-	RedisService
-> =>
+export const checkCapacity = (): Effect.Effect<{ allowed: boolean; currentMachines: number }, RedisError, RedisService> =>
 	Effect.gen(function* () {
-		const countStr = yield* redisEffect((client) =>
-			client.get<string>(RedisKeys.countersActiveMachines)
-		);
+		const countStr = yield* redisEffect((client) => client.get<string>(RedisKeys.countersActiveMachines));
 
 		const currentMachines = Number(countStr || 0);
 		const allowed = currentMachines < RWOS_CONFIG.MAX_MACHINES;
@@ -91,29 +77,20 @@ export const checkCapacity = (): Effect.Effect<
 /**
  * Reserve a machine slot (increment counter).
  */
-export const reserveMachineSlot = (): Effect.Effect<
-	number,
-	RedisError,
-	RedisService
-> => redisEffect((client) => client.incr(RedisKeys.countersActiveMachines));
+export const reserveMachineSlot = (): Effect.Effect<number, RedisError, RedisService> =>
+	redisEffect((client) => client.incr(RedisKeys.countersActiveMachines));
 
 /**
  * Release a machine slot (decrement counter).
  */
-export const releaseMachineSlot = (): Effect.Effect<
-	number,
-	RedisError,
-	RedisService
-> =>
+export const releaseMachineSlot = (): Effect.Effect<number, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 
 		// Decrement but ensure it doesn't go below 0
 		const count = yield* Effect.tryPromise({
 			try: async () => {
-				const current = await client.get<number>(
-					RedisKeys.countersActiveMachines
-				);
+				const current = await client.get<number>(RedisKeys.countersActiveMachines);
 				if (!current || current <= 0) {
 					await client.set(RedisKeys.countersActiveMachines, "0");
 					return 0;
@@ -133,11 +110,7 @@ export const releaseMachineSlot = (): Effect.Effect<
  * Full admission check: rate limit + capacity.
  * Returns true if a machine can be created.
  */
-export const canCreateMachine = (): Effect.Effect<
-	{ allowed: boolean; reason?: string },
-	RedisError,
-	RedisService
-> =>
+export const canCreateMachine = (): Effect.Effect<{ allowed: boolean; reason?: string }, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		// Check rate limit first
 		const rateOk = yield* checkRateLimit();
@@ -197,19 +170,12 @@ export const acquireMachineSlot = (): Effect.Effect<
 /**
  * Get current admission stats for monitoring.
  */
-export const getAdmissionStats = (): Effect.Effect<
-	{ activeMachines: number; maxMachines: number },
-	RedisError,
-	RedisService
-> =>
+export const getAdmissionStats = (): Effect.Effect<{ activeMachines: number; maxMachines: number }, RedisError, RedisService> =>
 	Effect.gen(function* () {
-		const countStr = yield* redisEffect((client) =>
-			client.get<string>(RedisKeys.countersActiveMachines)
-		);
+		const countStr = yield* redisEffect((client) => client.get<string>(RedisKeys.countersActiveMachines));
 
 		return {
 			activeMachines: Number(countStr || 0),
 			maxMachines: RWOS_CONFIG.MAX_MACHINES,
 		};
 	});
-

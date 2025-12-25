@@ -70,10 +70,7 @@ export interface Env {
  * Handle R2 event notification batch.
  * Called by the queue consumer when objects are uploaded.
  */
-export async function handleR2Events(
-	batch: MessageBatch<R2EventNotification>,
-	env: Env
-): Promise<void> {
+export async function handleR2Events(batch: MessageBatch<R2EventNotification>, env: Env): Promise<void> {
 	const redis = Redis.fromEnv(env);
 
 	console.log(`[R2 Events] Processing ${batch.messages.length} events`);
@@ -82,10 +79,7 @@ export async function handleR2Events(
 		const event = message.body;
 
 		// Only process object creation events
-		if (
-			event.action !== "PutObject" &&
-			event.action !== "CompleteMultipartUpload"
-		) {
+		if (event.action !== "PutObject" && event.action !== "CompleteMultipartUpload") {
 			console.log(`[R2 Events] Skipping ${event.action} event`);
 			message.ack();
 			continue;
@@ -111,9 +105,7 @@ export async function handleR2Events(
 
 		try {
 			// Get existing job data
-			const jobData = await redis.hgetall<Record<string, string>>(
-				RedisKeys.jobStatus(jobId)
-			);
+			const jobData = await redis.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId));
 
 			if (!jobData || Object.keys(jobData).length === 0) {
 				console.log(`[R2 Events] Job ${jobId} not found, creating new job`);
@@ -138,12 +130,7 @@ type RedisClient = ReturnType<typeof Redis.fromEnv>;
 /**
  * Create a new job from R2 event (for direct uploads without presigned URL)
  */
-async function createJobFromEvent(
-	redis: RedisClient,
-	env: Env,
-	jobId: string,
-	event: R2EventNotification
-): Promise<void> {
+async function createJobFromEvent(redis: RedisClient, env: Env, jobId: string, event: R2EventNotification): Promise<void> {
 	const now = Date.now();
 
 	const jobData: JobData = {
@@ -183,7 +170,7 @@ async function updateJobFromEvent(
 	env: Env,
 	jobId: string,
 	_existingData: Record<string, string>,
-	event: R2EventNotification
+	event: R2EventNotification,
 ): Promise<void> {
 	const now = Date.now();
 
@@ -229,8 +216,8 @@ async function trySpawnWorker(env: Env): Promise<void> {
 		const result = await Effect.runPromise(
 			maybeSpawnWorker(spawnConfig).pipe(
 				Effect.catchAll(() => Effect.succeed(null)),
-				Effect.provide(redisLayer)
-			)
+				Effect.provide(redisLayer),
+			),
 		);
 
 		if (result) {
@@ -240,4 +227,3 @@ async function trySpawnWorker(env: Env): Promise<void> {
 		console.error(`[R2 Events] Failed to spawn worker:`, error);
 	}
 }
-

@@ -2,15 +2,18 @@
 	"name": "tcoder",
 	"version": "0.0.0",
 	"private": true,
-	"workspaces": [
-		"fly"
-	],
+	"workspaces": ["fly"],
 	"scripts": {
 		"dev": "wrangler dev",
 		"deploy": "wrangler deploy",
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types",
+		"format": "biome format .",
+		"format:check": "biome format .",
+		"format:write": "biome format --write .",
+		"knip": "knip",
+		"knip:fix": "knip --fix",
 		"fly:first-launch": "cd fly && bun run first-launch",
 		"fly:deploy": "cd fly && bun run deploy",
 		"fly:logs": "cd fly && bun run logs",
@@ -21,7 +24,9 @@
 		"secrets:setup": "echo 'Run: wrangler secret put UPSTASH_REDIS_REST_URL && wrangler secret put UPSTASH_REDIS_REST_TOKEN && wrangler secret put FLY_API_TOKEN'"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
 		"@cloudflare/vitest-pool-workers": "^0.8.19",
+		"knip": "^5.50.0",
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.56.0"

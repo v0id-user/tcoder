@@ -69,7 +69,24 @@ const getFFmpegArgs = (config: JobConfig, localInputPath: string, localOutputPat
 		case "web-optimized":
 			return [...baseArgs, "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "aac", "-b:a", "128k", localOutputPath];
 		case "hls":
-			return [...baseArgs, "-c:v", "libx264", "-preset", "fast", "-g", "48", "-sc_threshold", "0", "-c:a", "aac", "-hls_time", "4", "-hls_playlist_type", "vod", localOutputPath];
+			return [
+				...baseArgs,
+				"-c:v",
+				"libx264",
+				"-preset",
+				"fast",
+				"-g",
+				"48",
+				"-sc_threshold",
+				"0",
+				"-c:a",
+				"aac",
+				"-hls_time",
+				"4",
+				"-hls_playlist_type",
+				"vod",
+				localOutputPath,
+			];
 		default:
 			return [...baseArgs, "-c", "copy", localOutputPath];
 	}
@@ -107,9 +124,7 @@ const uploadOutputs = (config: JobConfig, localOutputPaths: string[]) =>
 			const quality = config.outputQualities?.[i] || `quality-${i + 1}`;
 			const baseR2Key = extractR2Key(config.outputUrl);
 			const ext = localPath.match(/\.([^.]+)$/)?.[1] || "mp4";
-			const r2Key = config.outputQualities
-				? `${baseR2Key.replace(/\.[^/.]+$/, "")}-${quality}.${ext}`
-				: baseR2Key;
+			const r2Key = config.outputQualities ? `${baseR2Key.replace(/\.[^/.]+$/, "")}-${quality}.${ext}` : baseR2Key;
 
 			yield* Console.log(`[Upload] ${quality} -> ${r2Key}`);
 			const r2Url = yield* r2Client.upload(localPath, r2Key, {
@@ -238,9 +253,9 @@ const workerLoop = Effect.gen(function* () {
 			const jobId = yield* popJob(machineId);
 
 			if (!jobId) {
-			// No jobs available, wait and retry
-			const elapsed = Date.now() - startTime;
-			const remaining = LEASE_CONFIG.MACHINE_TTL_MS - elapsed;
+				// No jobs available, wait and retry
+				const elapsed = Date.now() - startTime;
+				const remaining = LEASE_CONFIG.MACHINE_TTL_MS - elapsed;
 
 				if (remaining < LEASE_CONFIG.DRAIN_BUFFER_MS) {
 					// Not enough time left, exit
@@ -278,11 +293,7 @@ const workerLoop = Effect.gen(function* () {
 // Entry Point
 // =============================================================================
 
-const program = workerLoop.pipe(
-	Effect.provide(
-		Layer.mergeAll(makeRedisLayer, makeR2ClientLayer, makeWebhookClientLayer)
-	)
-);
+const program = workerLoop.pipe(Effect.provide(Layer.mergeAll(makeRedisLayer, makeR2ClientLayer, makeWebhookClientLayer)));
 
 Effect.runPromiseExit(program).then((exit) => {
 	if (Exit.isSuccess(exit)) {
