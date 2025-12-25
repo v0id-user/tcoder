@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateInputKey, generateOutputKey, extractJobIdFromKey } from "../src/r2/presigned";
+import { extractJobIdFromKey, generateInputKey, generateOutputKey } from "../src/r2/presigned";
 
 describe("R2 Key Generation", () => {
 	describe("generateInputKey", () => {

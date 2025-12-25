@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
 	type JobData,
-	serializeJobData,
 	deserializeJobData,
-	serializeMachinePoolEntry,
 	deserializeMachinePoolEntry,
+	serializeJobData,
+	serializeMachinePoolEntry,
 } from "../src/redis/schema";
 
 describe("Schema Serialization", () => {
