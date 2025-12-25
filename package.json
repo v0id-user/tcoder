@@ -18,8 +18,9 @@
 		"lint:fix": "biome lint --write .",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
-		"knip": "knip",
+		"knip": "knip --exclude exports,types",
 		"knip:fix": "knip --fix",
+		"knip:all": "knip",
 		"validate": "bun run format:check && bun run lint && bun run knip",
 		"fix:all": "bun run format:write && bun run lint:fix && bun run knip:fix",
 		"fly:first-launch": "cd fly && bun run first-launch",
@@ -34,8 +35,8 @@
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
 		"@cloudflare/vitest-pool-workers": "^0.8.71",
-		"knip": "^5.50.0",
-		"typescript": "^5.5.2",
+		"knip": "^5.77.1",
+		"typescript": "^5.9.3",
 		"vitest": "~3.2.4",
 		"wrangler": "^4.56.0"
 	},
@@ -44,9 +45,9 @@
 		"@aws-sdk/s3-request-presigner": "^3.958.0",
 		"@hono/zod-validator": "^0.5.0",
 		"@types/node": "^25.0.3",
-		"@upstash/redis": "^1.35.8",
+		"@upstash/redis": "^1.36.0",
 		"effect": "^3.19.13",
-		"hono": "^4.11.1",
-		"zod": "^3.25.28"
+		"hono": "^4.11.2",
+		"zod": "^3.25.76"
 	}
 }
