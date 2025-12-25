@@ -28,16 +28,18 @@ const isDevMode = (env: Env): boolean => {
 	return !env.FLY_API_TOKEN || env.FLY_API_TOKEN === "" || process.env.NODE_ENV === "development";
 };
 
-const app = new Hono();
+// Create base app - Bindings type not needed for RPC type inference
+// Chain routes directly for proper RPC type inference
+// See: https://hono.dev/docs/guides/best-practices#if-you-want-to-use-rpc-features
+const routes = new Hono()
+	.get("/", (c) => c.json({ status: "ok", service: "tcoder" }))
+	.route("/api", createRoutes())
+	.route("/", createWebhookRoutes());
 
-// Health check
-app.get("/", (c) => c.json({ status: "ok", service: "tcoder" }));
-
-// Mount API routes
-app.route("/api", createRoutes());
-
-// Mount webhook routes
-app.route("/", createWebhookRoutes());
+// Export routes and AppType for RPC client
+// AppType must be the chained routes, not the base app
+export { routes as app };
+export type AppType = typeof routes;
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
@@ -47,7 +49,7 @@ export default {
 			console.log(`[Worker] ${devMode ? "🔧 DEV MODE" : "🚀 PRODUCTION MODE"}`);
 			(globalThis as { _devModeLogged?: boolean })._devModeLogged = true;
 		}
-		return app.fetch(request, env);
+		return routes.fetch(request, env);
 	},
 
 	/**
