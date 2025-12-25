@@ -16,9 +16,7 @@ async function getCloudflareTest() {
 
 describe("API Routes", () => {
 	describe("GET /status", () => {
-		it(
-			"returns status with server time and Redis info",
-			async () => {
+		it("returns status with server time and Redis info", async () => {
 				const cfTest = await getCloudflareTest();
 				if (!cfTest) return;
 				const { SELF } = cfTest;
@@ -46,13 +44,9 @@ describe("API Routes", () => {
 					expect(data.redis.ping).toBe("PONG");
 					expect(data.redis.testRead).toBe(true);
 				}
-			},
-			{ timeout: 30000 }, // 30 second timeout for Redis connection
-		);
+			}, 30000); // 30 second timeout for Redis connection
 
-		it(
-			"handles Redis connection errors gracefully",
-			async () => {
+		it("handles Redis connection errors gracefully", async () => {
 				const cfTest = await getCloudflareTest();
 				if (!cfTest) return;
 				const { SELF } = cfTest;
@@ -76,43 +70,37 @@ describe("API Routes", () => {
 					expect(data.redis).toHaveProperty("connected");
 					expect(data.redis.connected).toBe(false);
 				}
-			},
-			{ timeout: 10000 },
-		);
+			}, 10000);
 	});
 
 	describe("GET /stats", () => {
-		it(
-			"returns system stats",
-			async () => {
-				const cfTest = await getCloudflareTest();
-				if (!cfTest) return;
-				const { SELF } = cfTest;
+		it("returns system stats", async () => {
+			const cfTest = await getCloudflareTest();
+			if (!cfTest) return;
+			const { SELF } = cfTest;
 
-				const response = await SELF.fetch("https://example.com/api/stats");
+			const response = await SELF.fetch("https://example.com/api/stats");
 
-				// May fail if Redis is not configured
-				if (response.status === 200) {
-					const data = (await response.json()) as {
-						machines: { activeMachines: number; maxMachines: number };
-						pendingJobs: number;
-						activeJobs: number;
-						activeJobIds: string[];
-					};
-					expect(data).toHaveProperty("machines");
-					expect(data).toHaveProperty("pendingJobs");
-					expect(data).toHaveProperty("activeJobs");
-					expect(data).toHaveProperty("activeJobIds");
-					expect(Array.isArray(data.activeJobIds)).toBe(true);
-				} else {
-					// Redis unavailable - verify it's an error response
-					expect(response.status).toBe(500);
-					const data = (await response.json()) as { error: string };
-					expect(data.error).toBe("Redis connection failed");
-				}
-			},
-			{ timeout: 10000 },
-		);
+			// May fail if Redis is not configured
+			if (response.status === 200) {
+				const data = (await response.json()) as {
+					machines: { activeMachines: number; maxMachines: number };
+					pendingJobs: number;
+					activeJobs: number;
+					activeJobIds: string[];
+				};
+				expect(data).toHaveProperty("machines");
+				expect(data).toHaveProperty("pendingJobs");
+				expect(data).toHaveProperty("activeJobs");
+				expect(data).toHaveProperty("activeJobIds");
+				expect(Array.isArray(data.activeJobIds)).toBe(true);
+			} else {
+				// Redis unavailable - verify it's an error response
+				expect(response.status).toBe(500);
+				const data = (await response.json()) as { error: string };
+				expect(data.error).toBe("Redis connection failed");
+			}
+		}, 10000);
 	});
 
 	describe("GET /jobs/:jobId", () => {

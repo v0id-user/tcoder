@@ -8,9 +8,7 @@ describe("Worker", () => {
 	});
 
 	describe("Fetch Handler", () => {
-		it(
-			"responds with ok status on root path",
-			async () => {
+		it("responds with ok status on root path", async () => {
 				const cfTest = await getCloudflareTest();
 				if (!cfTest) {
 					// Skip test if cloudflare:test is not available (e.g., running with bun test)
@@ -32,9 +30,7 @@ describe("Worker", () => {
 					status: "ok",
 					service: "tcoder",
 				});
-			},
-			{ timeout: 10000 },
-		);
+			}, 10000);
 
 		it("responds with ok status (integration style)", async () => {
 			const cfTest = await getCloudflareTest();
