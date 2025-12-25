@@ -23,6 +23,17 @@ import { RWOS_CONFIG, RedisKeys, deserializeJobData, deserializeMachinePoolEntry
 import { stopMachine } from "./orchestration/machine-pool";
 import { makeRedisLayer } from "./redis/client";
 
+// =============================================================================
+// Dev Mode Detection
+// =============================================================================
+
+/**
+ * Check if we're in dev mode (local development with Docker worker).
+ */
+const isDevMode = (env: Env): boolean => {
+	return !env.FLY_API_TOKEN || env.FLY_API_TOKEN === "" || process.env.NODE_ENV === "development";
+};
+
 const app = new Hono();
 
 // Health check
@@ -35,7 +46,15 @@ app.route("/api", createRoutes());
 app.route("/", createWebhookRoutes());
 
 export default {
-	fetch: app.fetch as ExportedHandler<Env>["fetch"],
+	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+		// Log dev mode status on first request
+		if (!(globalThis as { _devModeLogged?: boolean })._devModeLogged) {
+			const devMode = isDevMode(env);
+			console.log(`[Worker] ${devMode ? "🔧 DEV MODE" : "🚀 PRODUCTION MODE"}`);
+			(globalThis as { _devModeLogged?: boolean })._devModeLogged = true;
+		}
+		return app.fetch(request, env);
+	},
 
 	/**
 	 * Queue handler for R2 event notifications.
