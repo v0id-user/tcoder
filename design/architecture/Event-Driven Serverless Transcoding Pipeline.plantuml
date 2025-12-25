@@ -11,6 +11,9 @@ actor Client as "User Client"
 box "Cloudflare Ecosystem" #e3f2fd
     participant Worker as "Worker API\n(Control Plane)"
     database R2 as "R2 Storage"
+end box
+
+box "Orchestration" #e8f5e9
     database Redis as "Upstash Redis"
 end box
 
