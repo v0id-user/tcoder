@@ -2,7 +2,7 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "tcoder",
 	"main": "src/index.ts",
-	"compatibility_date": "2025-12-24",
+	"compatibility_date": "2025-09-06",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": {
 		"enabled": true

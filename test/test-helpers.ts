@@ -33,6 +33,16 @@ export class MockRedis {
 			return null;
 		}
 		const value = this.data.get(key);
+		if (value === undefined) return null;
+
+		// If T is number, try to parse the string value
+		if (typeof value === "string" && (value.match(/^-?\d+$/) || value.match(/^-?\d*\.\d+$/))) {
+			const num = Number(value);
+			if (!Number.isNaN(num)) {
+				return num as T;
+			}
+		}
+
 		return (value as T) || null;
 	}
 
@@ -103,6 +113,13 @@ export class MockRedis {
 	}
 
 	async incr(key: string): Promise<number> {
+		// Check expiration first
+		const expiration = this.expirations.get(key);
+		if (expiration && Date.now() > expiration) {
+			this.expirations.delete(key);
+			this.data.delete(key);
+		}
+
 		const current = Number(this.data.get(key) || "0");
 		const next = current + 1;
 		this.data.set(key, String(next));
@@ -110,6 +127,13 @@ export class MockRedis {
 	}
 
 	async decr(key: string): Promise<number> {
+		// Check expiration first
+		const expiration = this.expirations.get(key);
+		if (expiration && Date.now() > expiration) {
+			this.expirations.delete(key);
+			this.data.delete(key);
+		}
+
 		const current = Number(this.data.get(key) || "0");
 		const next = Math.max(0, current - 1);
 		this.data.set(key, String(next));
@@ -200,9 +224,9 @@ export class MockRedis {
 		const sorted = Array.from(zset.entries()).sort((a, b) => a[1] - b[1]);
 		const results: string[] = [];
 		for (let i = 0; i < Math.min(count, sorted.length); i++) {
-			const [member, score] = sorted[i];
+			const [member] = sorted[i];
 			zset.delete(member);
-			results.push(JSON.stringify({ member, score }));
+			results.push(member);
 		}
 		return results;
 	}

@@ -111,7 +111,8 @@ describe("Spawner", () => {
 			});
 
 			// Mock start machine API call
-			vi.mocked(flyClient.Machines_start).mockResolvedValue({} as never);
+			// biome-ignore lint/suspicious/noExplicitAny: Mock function requires any
+			(flyClient.Machines_start as any).mockResolvedValue({} as never);
 
 			const result = await runWithMockRedis(spawnWorker(baseConfig), mockRedis);
 
@@ -131,7 +132,8 @@ describe("Spawner", () => {
 		it("creates new machine when no stopped machines available", async () => {
 			// No stopped machines in set
 			const newMachineId = "new-machine-456";
-			vi.mocked(flyClient.Machines_create).mockResolvedValue({
+			// biome-ignore lint/suspicious/noExplicitAny: Mock function requires any
+			(flyClient.Machines_create as any).mockResolvedValue({
 				data: {
 					id: newMachineId,
 					state: "started",
@@ -182,7 +184,8 @@ describe("Spawner", () => {
 			// Mock creation failure
 			const error = new Error("Creation failed") as Error & { response?: { status: number; data: string } };
 			error.response = { status: 500, data: "Internal Server Error" };
-			vi.mocked(flyClient.Machines_create).mockRejectedValue(error);
+			// biome-ignore lint/suspicious/noExplicitAny: Mock function requires any
+			(flyClient.Machines_create as any).mockRejectedValue(error);
 
 			const exit = await runWithMockRedisExit(spawnWorker(baseConfig), mockRedis);
 			const err = extractErrorFromExit(exit);
@@ -204,7 +207,8 @@ describe("Spawner", () => {
 			// No stopped machines
 			const rateLimitError = new Error("Rate limited") as Error & { response?: { status: number; data: string } };
 			rateLimitError.response = { status: 429, data: "Too Many Requests" };
-			vi.mocked(flyClient.Machines_create).mockRejectedValue(rateLimitError);
+			// biome-ignore lint/suspicious/noExplicitAny: Mock function requires any
+			(flyClient.Machines_create as any).mockRejectedValue(rateLimitError);
 
 			const exit = await runWithMockRedisExit(spawnWorker(baseConfig), mockRedis);
 			const error = extractErrorFromExit(exit);
@@ -222,7 +226,8 @@ describe("Spawner", () => {
 			// No stopped machines
 			const serverError = new Error("Server error") as Error & { response?: { status: number; data: string } };
 			serverError.response = { status: 503, data: "Service Unavailable" };
-			vi.mocked(flyClient.Machines_create).mockRejectedValue(serverError);
+			// biome-ignore lint/suspicious/noExplicitAny: Mock function requires any
+			(flyClient.Machines_create as any).mockRejectedValue(serverError);
 
 			const exit = await runWithMockRedisExit(spawnWorker(baseConfig), mockRedis);
 			const error = extractErrorFromExit(exit);
