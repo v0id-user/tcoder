@@ -42,6 +42,13 @@ vi.mock("../fly/fly-client", () => {
 // Import after mocking
 import { flyClient } from "../fly/fly-client";
 
+// Type assertions for vitest mocks
+const mockFlyClient = flyClient as unknown as {
+	Machines_start: ReturnType<typeof vi.fn>;
+	Machines_stop: ReturnType<typeof vi.fn>;
+	Machines_list: ReturnType<typeof vi.fn>;
+};
+
 describe("Machine Pool", () => {
 	let mockRedis: MockRedis;
 	const flyConfig = {
@@ -70,12 +77,12 @@ describe("Machine Pool", () => {
 			await mockRedis.sadd(RedisKeys.machinesStopped, machineId);
 
 			// Mock Fly API success
-			flyClient.Machines_start.mockResolvedValue({} as never);
+			mockFlyClient.Machines_start.mockResolvedValue({} as never);
 
 			await runWithMockRedis(startMachine(machineId, flyConfig), mockRedis);
 
 			// Verify Fly API called
-			expect(flyClient.Machines_start).toHaveBeenCalledWith(
+			expect(mockFlyClient.Machines_start).toHaveBeenCalledWith(
 				{
 					app_name: flyConfig.appName,
 					machine_id: machineId,
@@ -116,7 +123,7 @@ describe("Machine Pool", () => {
 			// Mock Fly API error
 			const error = new Error("API Error") as Error & { response?: { status: number; data: string } };
 			error.response = { status: 500, data: "Internal Server Error" };
-			flyClient.Machines_start.mockRejectedValue(error);
+			mockFlyClient.Machines_start.mockRejectedValue(error);
 
 			const exit = await runWithMockRedisExit(startMachine(machineId, flyConfig), mockRedis);
 			const err = extractErrorFromExit(exit);
@@ -142,12 +149,12 @@ describe("Machine Pool", () => {
 			});
 
 			// Mock Fly API success
-			flyClient.Machines_stop.mockResolvedValue({} as never);
+			mockFlyClient.Machines_stop.mockResolvedValue({} as never);
 
 			await runWithMockRedis(stopMachine(machineId, flyConfig), mockRedis);
 
 			// Verify Fly API called
-			expect(flyClient.Machines_stop).toHaveBeenCalledWith(
+			expect(mockFlyClient.Machines_stop).toHaveBeenCalledWith(
 				{
 					app_name: flyConfig.appName,
 					machine_id: machineId,
@@ -194,7 +201,7 @@ describe("Machine Pool", () => {
 			];
 
 			// Mock Fly API response
-			flyClient.Machines_list.mockResolvedValue({
+			mockFlyClient.Machines_list.mockResolvedValue({
 				data: { machines },
 			} as never);
 
@@ -225,7 +232,7 @@ describe("Machine Pool", () => {
 			});
 
 			// Mock Fly API returns empty list
-			flyClient.Machines_list.mockResolvedValue({
+			mockFlyClient.Machines_list.mockResolvedValue({
 				data: { machines: [] },
 			} as never);
 
