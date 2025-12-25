@@ -1,11 +1,11 @@
 /**
  * Redis Client for Fly Workers (Bun runtime)
  *
- * Uses standard @upstash/redis (not cloudflare variant).
- * Workers get Redis credentials via environment variables.
+ * Uses ioredis for direct TCP connection to Redis.
+ * Workers get Redis URL via REDIS_URL environment variable.
  */
 
-import { Redis } from "@upstash/redis";
+import Redis from "ioredis";
 import { Context, Effect, Layer } from "effect";
 
 // =============================================================================
@@ -45,13 +45,31 @@ export const redisEffect = <T>(operation: (redis: Redis) => Promise<T>): Effect.
 export const makeRedisLayer = Layer.effect(
 	RedisService,
 	Effect.sync(() => {
-		const url = process.env.UPSTASH_REDIS_REST_URL;
-		const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+		const url = process.env.REDIS_URL;
 
-		if (!url || !token) {
-			throw new Error("Missing: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN");
+		if (!url) {
+			console.error("Missing env: REDIS_URL");
+			process.exit(1);
 		}
 
-		return { client: new Redis({ url, token }) };
+		console.log(`[Redis] Connecting to ${url.replace(/\/\/.*@/, "//***@").substring(0, 50)}...`);
+
+		const client = new Redis(url, {
+			maxRetriesPerRequest: 3,
+			retryStrategy: (times) => {
+				if (times > 3) return null;
+				return Math.min(times * 200, 1000);
+			},
+		});
+
+		client.on("error", (err) => {
+			console.error("[Redis] Connection error:", err.message);
+		});
+
+		client.on("connect", () => {
+			console.log("[Redis] Connected");
+		});
+
+		return { client };
 	}),
 );

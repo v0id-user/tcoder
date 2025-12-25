@@ -26,7 +26,10 @@ This guide explains how to run the tcoder system locally for development and tes
 Create a `.env` file in the root directory (used by both wrangler and fly-worker):
 
 ```env
-# Upstash Redis
+# Redis (direct connection for fly-worker)
+REDIS_URL=redis://user:password@your-redis-host:6379
+
+# Upstash Redis (HTTP API for Cloudflare Worker)
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
 UPSTASH_REDIS_REST_TOKEN=your-token
 
@@ -77,8 +80,7 @@ All services use hosted/managed infrastructure. No local databases or custom pro
 ### Fly-worker Missing Environment Variables
 
 The fly-worker requires these env vars in `.env`:
-- `UPSTASH_REDIS_REST_URL`
-- `UPSTASH_REDIS_REST_TOKEN`
+- `REDIS_URL` (direct Redis connection, e.g. `redis://user:pass@host:6379`)
 - `R2_ACCOUNT_ID`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`

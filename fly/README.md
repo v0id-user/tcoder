@@ -160,8 +160,7 @@ workers:leases
 cd fly
 
 fly secrets set \
-  UPSTASH_REDIS_REST_URL="https://your-redis.upstash.io" \
-  UPSTASH_REDIS_REST_TOKEN="your-token" \
+  REDIS_URL="redis://user:password@your-redis-host:6379" \
   R2_ACCOUNT_ID="your-account-id" \
   R2_ACCESS_KEY_ID="your-access-key" \
   R2_SECRET_ACCESS_KEY="your-secret-key" \
@@ -199,8 +198,7 @@ bun run deploy
 
 | Variable | Description |
 |----------|-------------|
-| `UPSTASH_REDIS_REST_URL` | Redis REST API URL |
-| `UPSTASH_REDIS_REST_TOKEN` | Redis auth token |
+| `REDIS_URL` | Redis connection URL (redis://user:pass@host:port) |
 | `R2_ACCOUNT_ID` | Cloudflare account ID |
 | `R2_ACCESS_KEY_ID` | R2 access key |
 | `R2_SECRET_ACCESS_KEY` | R2 secret key |

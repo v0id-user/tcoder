@@ -16,5 +16,5 @@ services:
       - FLY_MACHINE_ID=local-dev-worker
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Restart automatically to keep polling for jobs
-    restart: unless-stopped
+    # Restart on failure, max 5 attempts
+    restart: on-failure:5

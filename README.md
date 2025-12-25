@@ -141,8 +141,7 @@ bun run fly:first-launch
 # Set Fly secrets
 cd fly
 fly secrets set \
-  UPSTASH_REDIS_REST_URL="https://your-redis.upstash.io" \
-  UPSTASH_REDIS_REST_TOKEN="your-token" \
+  REDIS_URL="redis://user:password@your-redis-host:6379" \
   R2_ACCOUNT_ID="your-account" \
   R2_ACCESS_KEY_ID="your-key" \
   R2_SECRET_ACCESS_KEY="your-secret" \

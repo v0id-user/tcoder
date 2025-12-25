@@ -77,7 +77,7 @@ export const verifyAndActivateLease = (machineId: string): Effect.Effect<WorkerL
 
 		// Check for existing lease from spawner
 		const existingExpiry = yield* Effect.tryPromise({
-			try: () => client.hget<string>(RedisKeys.workersLeases, machineId),
+			try: () => client.hget(RedisKeys.workersLeases, machineId),
 			catch: (e) => ({
 				_tag: "CommandError" as const,
 				reason: e instanceof Error ? e.message : String(e),
@@ -86,7 +86,7 @@ export const verifyAndActivateLease = (machineId: string): Effect.Effect<WorkerL
 
 		// Get existing metadata to preserve startedAt if present
 		const existingMeta = yield* Effect.tryPromise({
-			try: () => client.hgetall<Record<string, string>>(RedisKeys.workerMeta(machineId)),
+			try: () => client.hgetall(RedisKeys.workerMeta(machineId)),
 			catch: (e) => ({
 				_tag: "CommandError" as const,
 				reason: e instanceof Error ? e.message : String(e),
@@ -100,9 +100,7 @@ export const verifyAndActivateLease = (machineId: string): Effect.Effect<WorkerL
 		// Update/create lease and activate worker
 		yield* redisEffect(async (client) => {
 			const pipe = client.pipeline();
-			pipe.hset(RedisKeys.workersLeases, {
-				[machineId]: String(expiresAt),
-			});
+			pipe.hset(RedisKeys.workersLeases, machineId, String(expiresAt));
 			pipe.hset(RedisKeys.workerMeta(machineId), {
 				machineId,
 				startedAt: String(startedAt),
@@ -135,7 +133,7 @@ export const extendLease = (machineId: string, extensionMs: number): Effect.Effe
 	Effect.gen(function* () {
 		const newExpiry = Date.now() + extensionMs + LEASE_CONFIG.LEASE_BUFFER_MS;
 
-		yield* redisEffect((client) => client.hset(RedisKeys.workersLeases, { [machineId]: String(newExpiry) }));
+		yield* redisEffect((client) => client.hset(RedisKeys.workersLeases, machineId, String(newExpiry)));
 
 		yield* Console.log(`[Lease] Extended to ${new Date(newExpiry).toISOString()}`);
 	});
@@ -193,8 +191,9 @@ export const popJob = (machineId: string): Effect.Effect<string | null, RedisErr
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 
+		// ioredis zpopmin returns [member, score] or null
 		const popped = yield* Effect.tryPromise({
-			try: () => client.zpopmin<string>(RedisKeys.jobsPending, 1),
+			try: () => client.zpopmin(RedisKeys.jobsPending, 1),
 			catch: (e) => ({
 				_tag: "CommandError" as const,
 				reason: e instanceof Error ? e.message : String(e),
@@ -205,8 +204,8 @@ export const popJob = (machineId: string): Effect.Effect<string | null, RedisErr
 			return null;
 		}
 
-		// Extract job ID from result
-		const jobId = typeof popped[0] === "object" && "member" in popped[0] ? (popped[0] as { member: string }).member : (popped[0] as string);
+		// ioredis returns [member, score] array
+		const jobId = popped[0] as string;
 
 		// Mark job as running
 		yield* redisEffect(async (client) => {
@@ -216,7 +215,7 @@ export const popJob = (machineId: string): Effect.Effect<string | null, RedisErr
 				machineId,
 				startedAt: String(Date.now()),
 			});
-			pipe.hset(RedisKeys.jobsActive, { [jobId]: machineId });
+			pipe.hset(RedisKeys.jobsActive, jobId, machineId);
 			await pipe.exec();
 		});
 
@@ -228,8 +227,9 @@ export const popJob = (machineId: string): Effect.Effect<string | null, RedisErr
  */
 export const getJobData = (jobId: string): Effect.Effect<Record<string, string> | null, RedisError, RedisService> =>
 	redisEffect(async (client) => {
-		const data = await client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId));
-		return data || null;
+		const data = await client.hgetall(RedisKeys.jobStatus(jobId));
+		// ioredis returns empty object {} if key doesn't exist
+		return Object.keys(data).length > 0 ? data : null;
 	});
 
 /**
