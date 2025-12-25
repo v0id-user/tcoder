@@ -2,14 +2,14 @@
  * Multi-Job FFmpeg Worker with Redis Orchestration
  *
  * Runs as a TTL-bounded worker that processes multiple jobs:
- * 1. Acquires lease from Redis
+ * 1. Verifies and activates lease from Redis (registered by spawner)
  * 2. Polls job queue for work
  * 3. Processes jobs until TTL or max jobs reached
  * 4. Releases lease and exits gracefully
  *
  * Worker lifecycle:
- * - Created via Fly Machines API
- * - Acquires Redis lease
+ * - Created via Fly Machines API (spawner registers lease with status "starting")
+ * - Verifies Redis lease exists and activates it
  * - Processes 1-3 jobs (configurable)
  * - Exits after TTL (5 min) or max jobs
  * - Billing stops when process exits
@@ -22,9 +22,9 @@ import { R2ClientService, getTempFilePath, extractR2Key } from "./r2-client";
 import { WebhookClientService, type WebhookPayload } from "./webhook-client";
 import { makeR2ClientLayer } from "./r2-client";
 import { makeWebhookClientLayer } from "./webhook-client";
-import { RedisService, makeRedisLayer } from "./redis-client";
+import { makeRedisLayer } from "./redis-client";
 import {
-	acquireLease,
+	verifyAndActivateLease,
 	releaseLease,
 	extendLease,
 	updateJobsProcessed,
@@ -217,8 +217,8 @@ const workerLoop = Effect.gen(function* () {
 	yield* Console.log(`🎬 Worker ${machineId} starting`);
 	yield* Console.log(`   TTL: ${LEASE_CONFIG.MACHINE_TTL_MS / 1000}s, Max jobs: ${LEASE_CONFIG.MAX_JOBS}`);
 
-	// Acquire lease
-	const lease = yield* acquireLease(machineId);
+	// Verify and activate lease (registered by spawner, or create if local dev)
+	const lease = yield* verifyAndActivateLease(machineId);
 	let jobsProcessed = 0;
 	let draining = false;
 	const startTime = lease.startedAt;

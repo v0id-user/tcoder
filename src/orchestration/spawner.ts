@@ -6,9 +6,9 @@
  */
 
 import { Effect, Schedule, Console } from "effect";
-import { RedisService, type RedisError } from "../redis/client";
+import { RedisService, redisEffect, type RedisError } from "../redis/client";
 import { acquireMachineSlot, releaseMachineSlot } from "./admission";
-import { RWOS_CONFIG } from "../redis/schema";
+import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
 
 // =============================================================================
 // Types
@@ -184,6 +184,27 @@ export const spawnWorker = (
 		);
 
 		yield* Console.log(`[Spawner] Created machine ${result.machineId}`);
+
+		// Register lease immediately (as per Admission Control diagram)
+		const now = Date.now();
+		const expiresAt = now + RWOS_CONFIG.MACHINE_TTL_MS + RWOS_CONFIG.LEASE_BUFFER_MS;
+
+		yield* redisEffect(async (client) => {
+			const pipe = client.pipeline();
+			pipe.hset(RedisKeys.workersLeases, {
+				[result.machineId]: String(expiresAt),
+			});
+			pipe.hset(RedisKeys.workerMeta(result.machineId), {
+				machineId: result.machineId,
+				startedAt: String(now),
+				jobsProcessed: "0",
+				status: "starting",
+			});
+			await pipe.exec();
+		});
+
+		yield* Console.log(`[Spawner] Registered lease for ${result.machineId}`);
+
 		return result;
 	});
 

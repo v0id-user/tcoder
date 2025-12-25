@@ -65,22 +65,41 @@ export interface WorkerState {
 // =============================================================================
 
 /**
- * Acquire a lease for this worker machine.
+ * Verify and activate a lease for this worker machine.
+ * 
+ * The spawner registers a lease with status "starting" when creating the machine.
+ * This function verifies the lease exists and activates it for processing.
+ * Falls back to creating a new lease if none exists (local dev / edge cases).
  */
-export const acquireLease = (
+export const verifyAndActivateLease = (
 	machineId: string
 ): Effect.Effect<WorkerLease, RedisError, RedisService> =>
 	Effect.gen(function* () {
+		const { client } = yield* RedisService;
+
+		// Check for existing lease from spawner
+		const existingExpiry = yield* Effect.tryPromise({
+			try: () => client.hget<string>(RedisKeys.workersLeases, machineId),
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+
+		// Get existing metadata to preserve startedAt if present
+		const existingMeta = yield* Effect.tryPromise({
+			try: () => client.hgetall<Record<string, string>>(RedisKeys.workerMeta(machineId)),
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+
 		const now = Date.now();
 		const expiresAt = now + LEASE_CONFIG.MACHINE_TTL_MS + LEASE_CONFIG.LEASE_BUFFER_MS;
+		const startedAt = existingMeta?.startedAt ? Number(existingMeta.startedAt) : now;
 
-		const lease: WorkerLease = {
-			machineId,
-			expiresAt,
-			startedAt: now,
-			jobsProcessed: 0,
-		};
-
+		// Update/create lease and activate worker
 		yield* redisEffect(async (client) => {
 			const pipe = client.pipeline();
 			pipe.hset(RedisKeys.workersLeases, {
@@ -88,7 +107,7 @@ export const acquireLease = (
 			});
 			pipe.hset(RedisKeys.workerMeta(machineId), {
 				machineId,
-				startedAt: String(now),
+				startedAt: String(startedAt),
 				jobsProcessed: "0",
 				status: "active",
 			});
@@ -100,8 +119,18 @@ export const acquireLease = (
 			await pipe.exec();
 		});
 
-		yield* Console.log(`[Lease] Acquired for ${machineId}, expires at ${new Date(expiresAt).toISOString()}`);
-		return lease;
+		if (existingExpiry) {
+			yield* Console.log(`[Lease] Activated existing lease for ${machineId}`);
+		} else {
+			yield* Console.log(`[Lease] Created new lease for ${machineId} (no spawner lease found)`);
+		}
+
+		return {
+			machineId,
+			expiresAt,
+			startedAt,
+			jobsProcessed: 0,
+		};
 	});
 
 /**
