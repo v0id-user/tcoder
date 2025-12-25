@@ -47,6 +47,7 @@ The pipeline consists of seven phases:
 **Compute Plane (Fly Machine):**
 - TTL-bounded workers (5 minute lifetime)
 - Process 1-3 jobs per worker (configurable)
+- Uses `@upstash/redis` HTTP client (same API as Cloudflare Worker)
 - Poll Redis queue with `ZPOPMIN` (atomic job claim)
 - Graceful drain mode when TTL < 60s or max jobs reached
 
@@ -141,7 +142,8 @@ bun run fly:first-launch
 # Set Fly secrets
 cd fly
 fly secrets set \
-  REDIS_URL="redis://user:password@your-redis-host:6379" \
+  UPSTASH_REDIS_REST_URL="https://your-redis.upstash.io" \
+  UPSTASH_REDIS_REST_TOKEN="your-token" \
   R2_ACCOUNT_ID="your-account" \
   R2_ACCESS_KEY_ID="your-key" \
   R2_SECRET_ACCESS_KEY="your-secret" \
@@ -310,21 +312,28 @@ tcoder/
 ## Local Development
 
 ```bash
+# Copy example env file
+cp env.local.example .env
+# Fill in R2 credentials in .env
+
+# Start everything
 bun run dev
 ```
 
 Starts everything:
-- Fly-worker container (polls Redis for jobs)
-- Wrangler dev (API at localhost:8787)
-- Scheduled trigger (every 5 minutes)
+- **Redis** - Local Redis container
+- **SRH Proxy** - Upstash-compatible HTTP API at `localhost:8079`
+- **Fly-worker** - Docker container polling Redis for jobs
+- **Wrangler dev** - API at `localhost:8787`
+- **Scheduled trigger** - Hits cron endpoint every 5 minutes
 
 **Prerequisites:**
 - Bun runtime
 - Docker
-- Upstash Redis account (free tier)
-- `.env` configured
+- Upstash Redis account (for Cloudflare Worker only)
+- `.env` configured (see `env.local.example`)
 
-**See [LOCAL_DEV.md](./LOCAL_DEV.md) for setup.**
+**See [LOCAL_DEV.md](./LOCAL_DEV.md) for detailed setup.**
 
 ## Documentation
 

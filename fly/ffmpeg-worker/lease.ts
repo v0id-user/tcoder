@@ -98,16 +98,16 @@ export const verifyAndActivateLease = (machineId: string): Effect.Effect<WorkerL
 		const startedAt = existingMeta?.startedAt ? Number(existingMeta.startedAt) : now;
 
 		// Update/create lease and activate worker
-		const pipe = client.pipeline();
+			const pipe = client.pipeline();
 		pipe.hset(RedisKeys.workersLeases, { [machineId]: String(expiresAt) });
-		pipe.hset(RedisKeys.workerMeta(machineId), {
-			machineId,
-			startedAt: String(startedAt),
-			jobsProcessed: "0",
-			status: "active",
-		});
-		// Set TTL on worker meta
-		pipe.expire(RedisKeys.workerMeta(machineId), Math.ceil((LEASE_CONFIG.MACHINE_TTL_MS + LEASE_CONFIG.LEASE_BUFFER_MS) / 1000));
+			pipe.hset(RedisKeys.workerMeta(machineId), {
+				machineId,
+				startedAt: String(startedAt),
+				jobsProcessed: "0",
+				status: "active",
+			});
+			// Set TTL on worker meta
+			pipe.expire(RedisKeys.workerMeta(machineId), Math.ceil((LEASE_CONFIG.MACHINE_TTL_MS + LEASE_CONFIG.LEASE_BUFFER_MS) / 1000));
 
 		yield* Effect.tryPromise({
 			try: () => pipe.exec(),
@@ -169,10 +169,10 @@ export const setDraining = (machineId: string): Effect.Effect<void, RedisError, 
 export const releaseLease = (machineId: string): Effect.Effect<void, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
-		const pipe = client.pipeline();
-		pipe.hdel(RedisKeys.workersLeases, machineId);
-		pipe.del(RedisKeys.workerMeta(machineId));
-		pipe.decr(RedisKeys.countersActiveMachines);
+			const pipe = client.pipeline();
+			pipe.hdel(RedisKeys.workersLeases, machineId);
+			pipe.del(RedisKeys.workerMeta(machineId));
+			pipe.decr(RedisKeys.countersActiveMachines);
 
 		yield* Effect.tryPromise({
 			try: () => pipe.exec(),
@@ -219,13 +219,13 @@ export const popJob = (machineId: string): Effect.Effect<string | null, RedisErr
 		const jobId = typeof popped[0] === "string" ? popped[0] : (popped[0] as { member: string }).member;
 
 		// Mark job as running
-		const pipe = client.pipeline();
-		pipe.hset(RedisKeys.jobStatus(jobId), {
-			status: "running",
-			machineId,
-			startedAt: String(Date.now()),
-		});
-		pipe.hset(RedisKeys.jobsActive, { [jobId]: machineId });
+			const pipe = client.pipeline();
+			pipe.hset(RedisKeys.jobStatus(jobId), {
+				status: "running",
+				machineId,
+				startedAt: String(Date.now()),
+			});
+			pipe.hset(RedisKeys.jobsActive, { [jobId]: machineId });
 
 		yield* Effect.tryPromise({
 			try: () => pipe.exec(),
