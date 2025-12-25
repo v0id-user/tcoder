@@ -2,7 +2,7 @@
  * Development Runner
  *
  * Runs everything for local development:
- * 1. Fly-worker container (processes jobs from Redis queue)
+ * 1. Fly-worker container (Docker)
  * 2. Wrangler dev (API + queue handler)
  * 3. Scheduled trigger (every 5 minutes)
  *
@@ -98,8 +98,6 @@ const program = Effect.gen(function* () {
 
 	// Start fly-worker container in background
 	yield* runBackground("fly-worker", "docker-compose", ["up", "--build"]);
-
-	// Wait for docker to initialize
 	yield* Effect.sleep("2 seconds");
 
 	// Start scheduled trigger in background

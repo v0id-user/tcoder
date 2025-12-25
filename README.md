@@ -146,7 +146,7 @@ fly secrets set \
   R2_ACCOUNT_ID="your-account" \
   R2_ACCESS_KEY_ID="your-key" \
   R2_SECRET_ACCESS_KEY="your-secret" \
-  R2_BUCKET_NAME="tcoder-output"
+  R2_OUTPUT_BUCKET_NAME="tcoder-output"
 ```
 
 ### 5. Deploy
@@ -323,7 +323,7 @@ Starts everything:
 - Bun runtime
 - Docker
 - Upstash Redis account (free tier)
-- `.dev.vars` + `.env` configured
+- `.env` configured
 
 **See [LOCAL_DEV.md](./LOCAL_DEV.md) for setup.**
 

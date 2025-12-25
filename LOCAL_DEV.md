@@ -5,7 +5,7 @@ This guide explains how to run the tcoder system locally for development and tes
 ## Prerequisites
 
 - [Bun](https://bun.sh) runtime
-- Docker (only needed for fly-worker testing)
+- Docker
 - Cloudflare account (for Workers, R2, Queues)
 - Upstash account (for Redis - free tier works fine)
 
@@ -18,28 +18,24 @@ This guide explains how to run the tcoder system locally for development and tes
 2. Create a new Redis database
 3. Copy the REST URL and REST Token
 
-**Cloudflare R2 & Queues:**
-- R2 buckets are configured in `wrangler.jsonc`
-- Queues are configured in `wrangler.jsonc`
+**Cloudflare R2:**
+- Create R2 API token at https://dash.cloudflare.com → R2 → Manage R2 API Tokens
 
-### 2. Create `.dev.vars` File
+### 2. Create `.env` File
 
-Create a `.dev.vars` file in the root directory. Wrangler automatically loads this for local dev:
+Create a `.env` file in the root directory (used by both wrangler and fly-worker):
 
 ```env
-# Upstash Redis (required)
+# Upstash Redis
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
 UPSTASH_REDIS_REST_TOKEN=your-token
 
-# Fly.io (required for spawning workers)
+# Fly.io
 FLY_API_TOKEN=your-fly-token
 FLY_APP_NAME=your-fly-app-name
 FLY_REGION=fra
 
-# Webhook URL (for job completion callbacks)
-WEBHOOK_BASE_URL=http://localhost:8787
-
-# R2 credentials (for presigned URLs)
+# R2 Configuration
 R2_ACCOUNT_ID=your-account-id
 R2_ACCESS_KEY_ID=your-access-key
 R2_SECRET_ACCESS_KEY=your-secret-key
@@ -47,24 +43,7 @@ R2_INPUT_BUCKET_NAME=tcoder-input
 R2_OUTPUT_BUCKET_NAME=tcoder-output
 ```
 
-### 3. Create `.env` File
-
-Create a `.env` file for the fly-worker container:
-
-```env
-# Upstash Redis
-UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
-UPSTASH_REDIS_REST_TOKEN=your-token
-
-# R2 Configuration (for downloading/uploading files)
-R2_ACCOUNT_ID=your-account-id
-R2_ACCESS_KEY_ID=your-access-key
-R2_SECRET_ACCESS_KEY=your-secret-key
-R2_BUCKET_NAME=tcoder-output
-R2_ENDPOINT=https://your-account-id.r2.cloudflarestorage.com
-```
-
-### 4. Run Everything
+### 3. Run Everything
 
 ```bash
 bun run dev
@@ -76,13 +55,6 @@ This starts:
 - **Scheduled trigger** - Hits cron endpoint every 5 minutes
 
 All three run together. Press `Ctrl+C` to stop everything.
-
-## Environment Files
-
-| File | Purpose | Used By |
-|------|---------|---------|
-| `.dev.vars` | Wrangler local dev secrets | `wrangler dev` |
-| `.env` | Fly-worker container env vars | `docker-compose` |
 
 ## Scripts
 
@@ -102,9 +74,21 @@ All services use hosted/managed infrastructure. No local databases or custom pro
 
 ## Troubleshooting
 
+### Fly-worker Missing Environment Variables
+
+The fly-worker requires these env vars in `.env`:
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+- `R2_ACCOUNT_ID`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_OUTPUT_BUCKET_NAME`
+
+If any are missing, the worker will exit with an error listing which ones are missing.
+
 ### Worker Can't Connect to Redis
 
-- Verify your Upstash credentials in `.dev.vars`
+- Verify your Upstash credentials in `.env`
 - Check that the REST URL starts with `https://`
 
 ### Scheduled Endpoint Not Triggering
@@ -112,9 +96,3 @@ All services use hosted/managed infrastructure. No local databases or custom pro
 - The trigger runs every 5 minutes after startup
 - First trigger happens 5 seconds after `bun run dev` starts
 - Check console for `[Trigger]` log messages
-
-### Fly-worker Can't Download from R2
-
-- Verify R2 credentials in `.env`
-- Ensure the bucket name matches
-- Check that R2 API token has read/write permissions

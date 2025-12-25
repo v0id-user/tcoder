@@ -75,7 +75,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 			env.R2_ACCOUNT_ID = job.r2Config.accountId;
 			env.R2_ACCESS_KEY_ID = job.r2Config.accessKeyId;
 			env.R2_SECRET_ACCESS_KEY = job.r2Config.secretAccessKey;
-			env.R2_BUCKET_NAME = job.r2Config.bucketName;
+			env.R2_OUTPUT_BUCKET_NAME = job.r2Config.bucketName;
 			if (job.r2Config.endpoint) {
 				env.R2_ENDPOINT = job.r2Config.endpoint;
 			}
