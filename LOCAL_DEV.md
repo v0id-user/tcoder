@@ -73,7 +73,7 @@ Create a `.env` file in the root directory with:
 ```env
 # Redis (for local Docker Compose)
 UPSTASH_REDIS_REST_URL=http://localhost:8080
-UPSTASH_REDIS_REST_TOKEN=
+UPSTASH_REDIS_REST_TOKEN=local-dev-token
 
 # R2 Configuration (for Fly worker)
 R2_ACCOUNT_ID=your-account-id
@@ -134,7 +134,7 @@ If port 8787 is already in use:
 
 ## Notes
 
-- The Redis REST API proxy (`redis-http-api`) provides a REST interface to standard Redis, allowing `@upstash/redis` to work with local Redis
+- The Redis REST API proxy (`upstash-redis-local`) provides a REST interface to standard Redis that mimics Upstash's REST API format, allowing `@upstash/redis` to work with local Redis
 - The Fly worker container is not started automatically - use the `worker` profile to start it
 - All scripts use Effect patterns for proper error handling and cleanup
 
