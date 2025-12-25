@@ -6,8 +6,8 @@
  */
 
 import { Effect } from "effect";
-import { RedisService, redisEffect, type RedisError } from "../redis/client";
-import { RedisKeys, RWOS_CONFIG, type JobData, type JobOutput, serializeJobData, deserializeJobData } from "../redis/schema";
+import { type RedisError, RedisService, redisEffect } from "../redis/client";
+import { type JobData, type JobOutput, RWOS_CONFIG, RedisKeys, deserializeJobData, serializeJobData } from "../redis/schema";
 
 // =============================================================================
 // Job Manager Error Types

@@ -5,8 +5,8 @@
  * Leases track worker state and enable dead worker detection.
  */
 
-import { Effect, Console } from "effect";
-import { RedisService, redisEffect, type RedisError } from "./redis-client";
+import { Console, Effect } from "effect";
+import { type RedisError, RedisService, redisEffect } from "./redis-client";
 
 // =============================================================================
 // Lease Configuration

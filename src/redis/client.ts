@@ -5,8 +5,8 @@
  * https://upstash.com/docs/redis/tutorials/cloudflare_workers_with_redis
  */
 
-import { Effect, Context, Layer } from "effect";
 import { Redis } from "@upstash/redis/cloudflare";
+import { Context, Effect, Layer } from "effect";
 
 // =============================================================================
 // Environment Type (Cloudflare Workers pattern)

@@ -5,7 +5,7 @@
  * Uses AWS SDK v3 with R2-compatible S3 API.
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // =============================================================================
@@ -86,7 +86,7 @@ export const generateDownloadUrl = async (
 	client: S3Client,
 	bucketName: string,
 	key: string,
-	expiresIn: number = 3600,
+	expiresIn = 3600,
 ): Promise<PresignedDownloadResult> => {
 	const command = new GetObjectCommand({
 		Bucket: bucketName,
@@ -119,7 +119,7 @@ export const generateInputKey = (jobId: string, filename: string): string => {
  * Generate output key pattern for a job.
  * Format: outputs/{jobId}/{quality}.{ext}
  */
-export const generateOutputKey = (jobId: string, quality: string, ext: string = "mp4"): string => {
+export const generateOutputKey = (jobId: string, quality: string, ext = "mp4"): string => {
 	return `outputs/${jobId}/${quality}.${ext}`;
 };
 

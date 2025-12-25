@@ -6,8 +6,8 @@
  */
 
 import { Effect } from "effect";
-import { RedisService, redisEffect, type RedisError } from "../redis/client";
-import { RedisKeys, RWOS_CONFIG } from "../redis/schema";
+import { type RedisError, RedisService, redisEffect } from "../redis/client";
+import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
 
 // =============================================================================
 // Admission Error Types
@@ -160,7 +160,7 @@ export const acquireMachineSlot = (): Effect.Effect<
 			yield* releaseMachineSlot();
 			return {
 				acquired: false,
-				reason: `Capacity exceeded after reservation`,
+				reason: "Capacity exceeded after reservation",
 			};
 		}
 

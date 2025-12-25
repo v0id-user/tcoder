@@ -5,10 +5,10 @@
  * Respects Fly API rate limits via admission controller.
  */
 
-import { Effect, Schedule, Console } from "effect";
-import { RedisService, redisEffect, type RedisError } from "../redis/client";
-import { acquireMachineSlot, releaseMachineSlot } from "./admission";
+import { Console, Effect, Schedule } from "effect";
+import { type RedisError, RedisService, redisEffect } from "../redis/client";
 import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
+import { acquireMachineSlot, releaseMachineSlot } from "./admission";
 
 // =============================================================================
 // Types

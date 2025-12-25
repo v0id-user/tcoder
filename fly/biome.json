@@ -9,6 +9,13 @@
 		"lineWidth": 140,
 		"lineEnding": "lf"
 	},
+	"linter": {
+		"enabled": true,
+		"ignore": ["**/*.d.ts", "node_modules/**", "spec.json"],
+		"rules": {
+			"recommended": true
+		}
+	},
 	"javascript": {
 		"formatter": {
 			"arrowParentheses": "always",

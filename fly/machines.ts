@@ -9,7 +9,7 @@
  * 5. Billing only for execution time
  */
 
-import { Effect, Context } from "effect";
+import { Context, Effect } from "effect";
 import { flyClient } from "./fly-client";
 import type { CreateMachineRequest, Machine } from "./fly-machine-apis";
 

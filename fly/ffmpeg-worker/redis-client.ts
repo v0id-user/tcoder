@@ -5,8 +5,8 @@
  * Workers get Redis credentials via environment variables.
  */
 
-import { Effect, Layer, Context } from "effect";
 import { Redis } from "@upstash/redis";
+import { Context, Effect, Layer } from "effect";
 
 // =============================================================================
 // Error Types

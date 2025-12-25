@@ -15,28 +15,28 @@
  * - Billing stops when process exits
  */
 
-import { Effect, Console, Exit, Layer } from "effect";
-import { $ } from "bun";
 import { unlink } from "node:fs/promises";
-import { R2ClientService, getTempFilePath, extractR2Key } from "./r2-client";
-import { WebhookClientService, type WebhookPayload } from "./webhook-client";
-import { makeR2ClientLayer } from "./r2-client";
-import { makeWebhookClientLayer } from "./webhook-client";
-import { makeRedisLayer } from "./redis-client";
+import { $ } from "bun";
+import { Console, Effect, Exit, Layer } from "effect";
 import {
-	verifyAndActivateLease,
-	releaseLease,
-	extendLease,
-	updateJobsProcessed,
-	setDraining,
-	shouldDrain,
-	popJob,
-	getJobData,
-	completeJob,
-	failJob,
 	LEASE_CONFIG,
 	type WorkerState,
+	completeJob,
+	extendLease,
+	failJob,
+	getJobData,
+	popJob,
+	releaseLease,
+	setDraining,
+	shouldDrain,
+	updateJobsProcessed,
+	verifyAndActivateLease,
 } from "./lease";
+import { R2ClientService, extractR2Key, getTempFilePath } from "./r2-client";
+import { makeR2ClientLayer } from "./r2-client";
+import { makeRedisLayer } from "./redis-client";
+import { WebhookClientService, type WebhookPayload } from "./webhook-client";
+import { makeWebhookClientLayer } from "./webhook-client";
 
 // =============================================================================
 // Types
@@ -105,7 +105,7 @@ const downloadInput = (inputUrl: string, localInputPath: string) =>
 
 const runFFmpeg = (args: string[]) =>
 	Effect.gen(function* () {
-		yield* Console.log(`[FFmpeg] Starting transcoding...`);
+		yield* Console.log("[FFmpeg] Starting transcoding...");
 		yield* Effect.tryPromise({
 			try: async () => {
 				await $`ffmpeg ${args}`.quiet();
@@ -259,7 +259,7 @@ const workerLoop = Effect.gen(function* () {
 
 				if (remaining < LEASE_CONFIG.DRAIN_BUFFER_MS) {
 					// Not enough time left, exit
-					yield* Console.log(`[Worker] No jobs and TTL near, exiting`);
+					yield* Console.log("[Worker] No jobs and TTL near, exiting");
 					break;
 				}
 

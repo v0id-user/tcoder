@@ -5,12 +5,12 @@
  * When a video is uploaded, enqueues a transcoding job.
  */
 
-import { Effect } from "effect";
 import { Redis } from "@upstash/redis/cloudflare";
-import { RedisKeys, RWOS_CONFIG, serializeJobData, type JobData } from "../redis/schema";
-import { extractJobIdFromKey } from "./presigned";
+import { Effect } from "effect";
+import { type SpawnConfig, maybeSpawnWorker } from "../orchestration/spawner";
 import { makeRedisLayer } from "../redis/client";
-import { maybeSpawnWorker, type SpawnConfig } from "../orchestration/spawner";
+import { type JobData, RWOS_CONFIG, RedisKeys, serializeJobData } from "../redis/schema";
+import { extractJobIdFromKey } from "./presigned";
 
 // =============================================================================
 // R2 Event Types (from Cloudflare)
@@ -224,6 +224,6 @@ async function trySpawnWorker(env: Env): Promise<void> {
 			console.log(`[R2 Events] Spawned worker: ${result.machineId}`);
 		}
 	} catch (error) {
-		console.error(`[R2 Events] Failed to spawn worker:`, error);
+		console.error("[R2 Events] Failed to spawn worker:", error);
 	}
 }

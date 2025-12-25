@@ -9,6 +9,13 @@
 		"lineWidth": 140,
 		"lineEnding": "lf"
 	},
+	"linter": {
+		"enabled": true,
+		"ignore": [".wrangler/**", "**/*.d.ts", "node_modules/**"],
+		"rules": {
+			"recommended": true
+		}
+	},
 	"javascript": {
 		"formatter": {
 			"arrowParentheses": "always",

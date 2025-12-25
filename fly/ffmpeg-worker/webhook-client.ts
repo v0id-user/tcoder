@@ -11,7 +11,7 @@
  * - Handle authentication if needed
  */
 
-import { Effect, Context, Console, Layer, pipe } from "effect";
+import { Console, Context, Effect, Layer, pipe } from "effect";
 
 // Webhook payload structure
 export interface WebhookPayload {
@@ -85,7 +85,7 @@ const sendWebhook = (payload: WebhookPayload): Effect.Effect<void, WebhookError,
 					if (error instanceof Error) {
 						if (error.message.includes("HTTP")) {
 							const match = error.message.match(/HTTP (\d+):/);
-							const status = match ? parseInt(match[1], 10) : 0;
+							const status = match ? Number.parseInt(match[1], 10) : 0;
 							return {
 								_tag: "WebhookFailed",
 								url: webhookUrl,

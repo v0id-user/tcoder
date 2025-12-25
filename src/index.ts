@@ -8,10 +8,10 @@
  * - Scheduled stale job recovery (cron)
  */
 
+import { Redis } from "@upstash/redis/cloudflare";
 import { Hono } from "hono";
 import { createRoutes, createWebhookRoutes } from "./api/routes";
-import { handleR2Events, type R2EventNotification, type MessageBatch } from "./r2/events";
-import { Redis } from "@upstash/redis/cloudflare";
+import { type MessageBatch, type R2EventNotification, handleR2Events } from "./r2/events";
 
 const app = new Hono();
 
