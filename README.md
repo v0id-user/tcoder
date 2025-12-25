@@ -4,17 +4,78 @@ Serverless video transcoding pipeline with Redis orchestration. Event-driven arc
 
 ## Architecture
 
+TCoder uses a **three-layer architecture** with RWOS (Redis Worker Orchestration System) for job orchestration:
+
+| Layer | Component | Responsibility |
+|-------|-----------|----------------|
+| **Control Plane** | Cloudflare Worker | API endpoints, admission control, machine spawning, event handling |
+| **State Store** | Upstash Redis | Job queue, worker leases, concurrency counters, job status |
+| **Compute Plane** | Fly.io Machines | FFmpeg transcoding, R2 I/O, webhook notifications |
+
 ![Event-Driven Serverless Transcoding Pipeline](./design/architecture/Event-Driven%20Serverless%20Transcoding%20Pipeline.png)
+
+### Pipeline Phases
 
 The pipeline consists of seven phases:
 
-1. **Authorization** - Client requests presigned upload URL
-2. **Ingestion** - Client uploads directly to R2, triggers event notification
-3. **Orchestration** - RWOS enqueues job, spawns worker if capacity available
-4. **Processing** - Fly Machine processes job, uploads outputs to R2
-5. **Discoverability** - Webhook notifies control plane, updates job status
-6. **Distribution** - Client fetches video via CDN
-7. **Recovery** - Cron job detects dead workers, requeues stale jobs
+1. **Authorization** - Client requests presigned upload URL from control plane
+2. **Ingestion** - Client uploads directly to R2, triggers Cloudflare Queue event notification
+3. **Orchestration (RWOS)** - Control plane enqueues job to Redis, checks rate limits and capacity, spawns Fly Machine if needed
+4. **Processing** - Fly Machine acquires lease, polls Redis queue, processes multiple jobs (up to 3) within TTL (5 min), uploads outputs to R2
+5. **Discoverability** - Worker sends webhook to control plane, updates job status in Redis
+6. **Distribution** - Client fetches transcoded video via CDN
+7. **Recovery** - Cron job (every minute) detects expired worker leases, requeues stale jobs
+
+### RWOS Components
+
+![Redis Worker Orchestration System](./design/architecture/RWOS/Redis%20Worker%20Orchestration%20System.png)
+
+**Control Plane (Cloudflare Worker):**
+- **Hono API** - Job submission endpoints (`POST /api/upload`, `GET /api/jobs/:id`)
+- **Admission Controller** - Rate limiting (1 req/sec) + capacity enforcement (max 5 machines)
+- **Machine Spawner** - Fly API calls with exponential backoff retry
+- **Cron Handler** - Stale job recovery, expired lease cleanup
+
+**State Store (Upstash Redis):**
+- `jobs:pending` (ZSET) - Job queue sorted by timestamp
+- `jobs:active` (HASH) - job_id → machine_id mapping
+- `jobs:status:{id}` (HASH) - Job metadata and status
+- `workers:leases` (HASH) - machine_id → expiry timestamp
+- `counters:active_machines` (STRING) - Current machine count
+- `counters:rate_limit` (STRING) - API rate limit counter (1s TTL)
+
+**Compute Plane (Fly Machine):**
+- TTL-bounded workers (5 minute lifetime)
+- Process 1-3 jobs per worker (configurable)
+- Poll Redis queue with `ZPOPMIN` (atomic job claim)
+- Graceful drain mode when TTL < 60s or max jobs reached
+
+### Admission Control Flow
+
+![Admission Control Flow](./design/architecture/RWOS/Admission%20Control%20Flow.png)
+
+When a job is submitted:
+1. **Rate Limit Check** - `INCR counters:rate_limit` (TTL 1s), retry if count > 1
+2. **Capacity Check** - `GET counters:active_machines`, proceed if < MAX_MACHINES (5)
+3. **Reserve Slot** - `INCR counters:active_machines` (atomic reservation)
+4. **Create Machine** - POST to Fly Machines API with exponential backoff
+5. **Register Lease** - `HSET workers:leases` with expiry timestamp
+
+### Worker Lifecycle
+
+![Worker Lifecycle](./design/architecture/RWOS/Worker%20Lifecycle.png)
+
+**States:**
+- **Starting** - Machine boots, connects to Redis, acquires lease
+- **Active** - Polling queue, processing jobs (up to 3), checking TTL
+- **Draining** - TTL < 60s or max jobs reached, no new jobs accepted
+- **Exiting** - Release lease, decrement counter, cleanup, exit
+
+**Key Constants:**
+- TTL: 5 minutes
+- MAX_JOBS: 3 per worker
+- POLL_INTERVAL: 5 seconds
+- DRAIN_BUFFER: 60 seconds before TTL expiry
 
 ## Quick Start
 
@@ -236,14 +297,16 @@ tcoder/
 
 ## Infrastructure
 
-| Component | Purpose |
-|-----------|---------|
-| **Cloudflare Worker** | Control plane - API, event handling, job orchestration |
-| **Upstash Redis** | State store - job queue, leases, counters |
-| **Cloudflare R2** | Object storage - input/output video files |
-| **Cloudflare Queues** | Event delivery - R2 notifications |
-| **Fly.io Machines** | Compute - FFmpeg transcoding workers |
-| **Bunny CDN** | Distribution - video streaming |
+| Component | Layer | Purpose |
+|-----------|-------|---------|
+| **Cloudflare Worker** | Control Plane | API endpoints, admission control, machine spawning, R2 event handling, cron recovery |
+| **Upstash Redis** | State Store | Job queue (ZSET), worker leases (HASH), concurrency counters, job status tracking |
+| **Cloudflare R2** | Storage | Object storage for input/output video files, presigned URL generation |
+| **Cloudflare Queues** | Event Delivery | R2 event notifications (object-create → queue → worker handler) |
+| **Fly.io Machines** | Compute Plane | TTL-bounded FFmpeg workers, multi-job processing, webhook notifications |
+| **Bunny CDN** | Distribution | Video streaming CDN (optional, outputs can be served directly from R2) |
+
+**See [Architecture Diagrams](./design/architecture/RWOS/) for detailed system design.**
 
 ## Local Development
 
