@@ -1,10 +1,9 @@
 /**
  * Development Runner
  *
- * Runs Cloudflare worker and Docker Compose concurrently.
+ * Runs Cloudflare worker and Docker Compose concurrently using Bun and Effect.
  */
 
-import { spawn } from "node:child_process";
 import { Console, Effect } from "effect";
 
 const runCommand = (command: string, args: string[], cwd?: string) =>
@@ -12,17 +11,14 @@ const runCommand = (command: string, args: string[], cwd?: string) =>
 		yield* Console.log(`[Dev Runner] Starting: ${command} ${args.join(" ")}`);
 
 		return new Promise<void>((resolve, reject) => {
-			const proc = spawn(command, args, {
+			const proc = Bun.spawn({
+				cmd: [command, ...args],
 				cwd,
-				stdio: "inherit",
-				shell: true,
+				stdout: "inherit",
+				stderr: "inherit",
 			});
 
-			proc.on("error", (error) => {
-				reject(error);
-			});
-
-			proc.on("exit", (code) => {
+			proc.exited.then((code) => {
 				if (code === 0 || code === null) {
 					resolve();
 				} else {
@@ -41,7 +37,7 @@ const runCommand = (command: string, args: string[], cwd?: string) =>
 
 const program = Effect.gen(function* () {
 	// Start Docker Compose in background
-	const dockerProcess = yield* Effect.fork(
+	yield* Effect.fork(
 		runCommand("docker-compose", ["up"], process.cwd()).pipe(Effect.catchAll((error) => Console.error(`[Dev Runner] Docker error: ${error}`))),
 	);
 
@@ -49,10 +45,8 @@ const program = Effect.gen(function* () {
 	yield* Effect.sleep("3 seconds");
 
 	// Start Cloudflare worker (which includes the trigger script)
+	// This runs in foreground - when it exits, we exit
 	yield* runCommand("bun", ["run", "dev:cf"], process.cwd());
-
-	// If we get here, wait for Docker process
-	yield* Effect.await(dockerProcess);
 });
 
 Effect.runPromise(program).catch((error) => {

@@ -44,5 +44,5 @@
 		}
 	},
 	"exclude": ["test"],
-	"include": ["worker-configuration.d.ts", "src/**/*.ts", "fly/**/*.ts"]
+	"include": ["worker-configuration.d.ts", "src/**/*.ts", "fly/**/*.ts", "scripts/**/*.ts"]
 }

@@ -1,28 +1,25 @@
 /**
  * Cloudflare Dev Runner
  *
- * Runs wrangler dev and scheduled trigger concurrently.
+ * Runs wrangler dev and scheduled trigger concurrently using Bun and Effect.
  */
 
-import { spawn } from "node:child_process";
 import { Console, Effect } from "effect";
+import { program as triggerProgram } from "./trigger-scheduled";
 
 const runCommand = (command: string, args: string[], cwd?: string) =>
 	Effect.gen(function* () {
 		yield* Console.log(`[CF Dev Runner] Starting: ${command} ${args.join(" ")}`);
 
 		return new Promise<void>((resolve, reject) => {
-			const proc = spawn(command, args, {
+			const proc = Bun.spawn({
+				cmd: [command, ...args],
 				cwd,
-				stdio: "inherit",
-				shell: true,
+				stdout: "inherit",
+				stderr: "inherit",
 			});
 
-			proc.on("error", (error) => {
-				reject(error);
-			});
-
-			proc.on("exit", (code) => {
+			proc.exited.then((code) => {
 				if (code === 0 || code === null) {
 					resolve();
 				} else {
@@ -40,9 +37,9 @@ const runCommand = (command: string, args: string[], cwd?: string) =>
 	});
 
 const program = Effect.gen(function* () {
-	// Start trigger script in background
+	// Start trigger program in background using Effect.fork
 	yield* Effect.fork(
-		runCommand("bun", ["run", "scripts/trigger-scheduled.ts"], process.cwd()).pipe(Effect.catchAll((error) => Console.error(`[CF Dev Runner] Trigger error: ${error}`))),
+		triggerProgram.pipe(Effect.catchAll((error) => Console.error(`[CF Dev Runner] Trigger error: ${error}`))),
 	);
 
 	// Wait a bit for trigger script to initialize

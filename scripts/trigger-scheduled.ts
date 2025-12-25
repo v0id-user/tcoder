@@ -37,7 +37,7 @@ const triggerScheduled = Effect.gen(function* () {
 	yield* Console.log(`[Scheduled Trigger] Response: ${text.substring(0, 200)}`);
 });
 
-const program = Effect.gen(function* () {
+export const program = Effect.gen(function* () {
 	yield* Console.log(`[Scheduled Trigger] Starting scheduled trigger (every ${INTERVAL_MINUTES} minutes)`);
 	yield* Console.log(`[Scheduled Trigger] Target: ${SCHEDULED_URL}`);
 
@@ -56,9 +56,11 @@ const program = Effect.gen(function* () {
 	);
 });
 
-// Run the program
-Effect.runPromise(program).catch((error) => {
-	console.error("[Scheduled Trigger] Fatal error:", error);
-	process.exit(1);
-});
+// Run the program if executed directly
+if (import.meta.main) {
+	Effect.runPromise(program).catch((error) => {
+		console.error("[Scheduled Trigger] Fatal error:", error);
+		process.exit(1);
+	});
+}
 
