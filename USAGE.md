@@ -26,7 +26,62 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/"
 
 ---
 
-## 2. Upload Flow
+## 2. Status Endpoint
+
+External status endpoint that hits Redis and returns server time. Useful for monitoring and verifying Redis connectivity.
+
+```bash
+curl -X GET "https://tcoder.your-subdomain.workers.dev/api/status"
+```
+
+**Response (success):**
+```json
+{
+  "status": "ok",
+  "serverTime": {
+    "timestamp": 1703510400000,
+    "iso": "2023-12-25T12:00:00.000Z",
+    "utc": "Mon, 25 Dec 2023 12:00:00 GMT"
+  },
+  "redis": {
+    "connected": true,
+    "ping": "PONG",
+    "testRead": true
+  }
+}
+```
+
+**Response (Redis error):**
+```json
+{
+  "status": "error",
+  "serverTime": {
+    "timestamp": 1703510400000,
+    "iso": "2023-12-25T12:00:00.000Z",
+    "utc": "Mon, 25 Dec 2023 12:00:00 GMT"
+  },
+  "redis": {
+    "connected": false,
+    "error": "Connection timeout"
+  }
+}
+```
+
+**Response Fields:**
+- `status`: `"ok"` if Redis connection succeeds, `"error"` otherwise
+- `serverTime.timestamp`: Unix timestamp in milliseconds
+- `serverTime.iso`: ISO 8601 formatted date string
+- `serverTime.utc`: UTC formatted date string
+- `redis.connected`: Boolean indicating Redis connectivity
+- `redis.ping`: Response from Redis PING command (usually `"PONG"`)
+- `redis.testRead`: Boolean indicating successful read/write test (only present on success)
+- `redis.error`: Error message if Redis connection fails (only present on error)
+
+**Note:** This endpoint performs actual Redis operations (PING, SET, GET, DEL) to verify connectivity and functionality. The server time is always returned regardless of Redis status.
+
+---
+
+## 3. Upload Flow
 
 Complete workflow for uploading a video file and transcoding it.
 
@@ -157,7 +212,7 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/api/jobs/550e8400-e29b-41
 
 ---
 
-## 3. Direct Job Submission
+## 4. Direct Job Submission
 
 Submit a transcoding job with an existing input URL (skip the upload step).
 
@@ -202,7 +257,7 @@ curl -X POST "https://tcoder.your-subdomain.workers.dev/api/jobs" \
 
 ---
 
-## 4. Job Status Polling
+## 5. Job Status Polling
 
 Check the status of any job by its ID.
 
@@ -229,7 +284,7 @@ uploading → queued → pending → running → completed
 
 ---
 
-## 5. System Stats
+## 6. System Stats
 
 Get system statistics including active machines, pending jobs, and active jobs.
 
@@ -264,7 +319,7 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/api/stats"
 
 ---
 
-## 6. Webhook Endpoint
+## 7. Webhook Endpoint
 
 Receive job completion notifications (for testing webhook integration).
 

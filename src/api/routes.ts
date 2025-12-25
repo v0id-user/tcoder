@@ -254,6 +254,54 @@ export const createRoutes = () => {
 		});
 	});
 
+	/**
+	 * GET /status - External status endpoint that hits Redis and returns server time
+	 */
+	app.get("/status", async (c) => {
+		const redis = Redis.fromEnv(c.env);
+		const serverTime = Date.now();
+		const serverTimeISO = new Date().toISOString();
+
+		try {
+			// Hit Redis with a simple operation
+			const redisPing = await redis.ping();
+			const testKey = `status:check:${serverTime}`;
+			await redis.set(testKey, serverTimeISO, { ex: 60 }); // Set with 60s expiry
+			const retrievedValue = await redis.get<string>(testKey);
+			await redis.del(testKey); // Cleanup
+
+			return c.json({
+				status: "ok",
+				serverTime: {
+					timestamp: serverTime,
+					iso: serverTimeISO,
+					utc: new Date().toUTCString(),
+				},
+				redis: {
+					connected: true,
+					ping: redisPing,
+					testRead: retrievedValue === serverTimeISO,
+				},
+			});
+		} catch (error) {
+			return c.json(
+				{
+					status: "error",
+					serverTime: {
+						timestamp: serverTime,
+						iso: serverTimeISO,
+						utc: new Date().toUTCString(),
+					},
+					redis: {
+						connected: false,
+						error: error instanceof Error ? error.message : String(error),
+					},
+				},
+				500,
+			);
+		}
+	});
+
 	return app;
 };
 
