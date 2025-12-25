@@ -50,56 +50,69 @@ describe("API Routes", () => {
 			{ timeout: 30000 }, // 30 second timeout for Redis connection
 		);
 
-		it("handles Redis connection errors gracefully", async () => {
-			const cfTest = await getCloudflareTest();
-			if (!cfTest) return;
-			const { SELF } = cfTest;
+		it(
+			"handles Redis connection errors gracefully",
+			async () => {
+				const cfTest = await getCloudflareTest();
+				if (!cfTest) return;
+				const { SELF } = cfTest;
 
-			const response = await SELF.fetch("https://example.com/api/status");
+				const response = await SELF.fetch("https://example.com/api/status");
 
-			// Should always return a response, even if Redis is unavailable
-			expect(response.status).toBeGreaterThanOrEqual(200);
-			expect(response.status).toBeLessThan(600);
+				// Should always return a response, even if Redis is unavailable
+				expect(response.status).toBeGreaterThanOrEqual(200);
+				expect(response.status).toBeLessThan(600);
 
-			const data = (await response.json()) as {
-				status: string;
-				serverTime: { timestamp: number; iso: string; utc: string };
-				redis: { connected?: boolean };
-			};
-			expect(data).toHaveProperty("status");
-			expect(data).toHaveProperty("serverTime");
+				const data = (await response.json()) as {
+					status: string;
+					serverTime: { timestamp: number; iso: string; utc: string };
+					redis: { connected?: boolean };
+				};
+				expect(data).toHaveProperty("status");
+				expect(data).toHaveProperty("serverTime");
 
-			// If Redis is unavailable, status may be "error"
-			if (data.status === "error") {
-				expect(data.redis).toHaveProperty("connected");
-				expect(data.redis.connected).toBe(false);
-			}
-		});
+				// If Redis is unavailable, status may be "error"
+				if (data.status === "error") {
+					expect(data.redis).toHaveProperty("connected");
+					expect(data.redis.connected).toBe(false);
+				}
+			},
+			{ timeout: 10000 },
+		);
 	});
 
 	describe("GET /stats", () => {
-		it("returns system stats", async () => {
-			const cfTest = await getCloudflareTest();
-			if (!cfTest) return;
-			const { SELF } = cfTest;
+		it(
+			"returns system stats",
+			async () => {
+				const cfTest = await getCloudflareTest();
+				if (!cfTest) return;
+				const { SELF } = cfTest;
 
-			const response = await SELF.fetch("https://example.com/api/stats");
+				const response = await SELF.fetch("https://example.com/api/stats");
 
-			// May fail if Redis is not configured
-			if (response.status === 200) {
-				const data = (await response.json()) as {
-					machines: { activeMachines: number; maxMachines: number };
-					pendingJobs: number;
-					activeJobs: number;
-					activeJobIds: string[];
-				};
-				expect(data).toHaveProperty("machines");
-				expect(data).toHaveProperty("pendingJobs");
-				expect(data).toHaveProperty("activeJobs");
-				expect(data).toHaveProperty("activeJobIds");
-				expect(Array.isArray(data.activeJobIds)).toBe(true);
-			}
-		});
+				// May fail if Redis is not configured
+				if (response.status === 200) {
+					const data = (await response.json()) as {
+						machines: { activeMachines: number; maxMachines: number };
+						pendingJobs: number;
+						activeJobs: number;
+						activeJobIds: string[];
+					};
+					expect(data).toHaveProperty("machines");
+					expect(data).toHaveProperty("pendingJobs");
+					expect(data).toHaveProperty("activeJobs");
+					expect(data).toHaveProperty("activeJobIds");
+					expect(Array.isArray(data.activeJobIds)).toBe(true);
+				} else {
+					// Redis unavailable - verify it's an error response
+					expect(response.status).toBe(500);
+					const data = (await response.json()) as { error: string };
+					expect(data.error).toBe("Redis connection failed");
+				}
+			},
+			{ timeout: 10000 },
+		);
 	});
 
 	describe("GET /jobs/:jobId", () => {
