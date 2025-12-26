@@ -264,11 +264,21 @@ const waitForCompletion = (machineId: string, apiToken: string) =>
 // Complete job execution flow
 export const executeTranscodeJob = (job: TranscodeJob) =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		// Create and start machine
 		const machine = yield* createTranscodeMachine(job);
-		if (machine.instance_id === undefined){
-			// TODO: make it an effect layer error and handle it more gracefully
-			throw new Error("Machine was created with no instance id")
+
+		if (machine.instance_id === undefined) {
+			const error: FlyApiError = {
+				_tag: "InvalidMachineResponse",
+				raw: machine,
+			};
+			yield* logger.error("Machine was created with no instance id", undefined, {
+				jobId: job.jobId,
+				machineId: machine.id,
+				raw: machine,
+			});
+			return yield* Effect.fail(error);
 		}
 
 		// Wait for completion
