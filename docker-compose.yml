@@ -33,8 +33,10 @@ services:
       # Local SRH emulates Upstash HTTP API
       UPSTASH_REDIS_REST_URL: http://serverless-redis-http:80
       UPSTASH_REDIS_REST_TOKEN: local_dev_token
-      # Webhook to host machine
-      WEBHOOK_URL: http://host.docker.internal:8787/webhooks/job-complete
+      # Webhook base URL to host machine (RPC client constructs full path)
+      # Access wrangler dev server running on host at http://localhost:8787
+      # Requires: wrangler dev must be running on the host machine
+      WEBHOOK_URL: http://host.docker.internal:8787
       # Local dev machine ID
       FLY_MACHINE_ID: local-dev-worker
       # Debug logging for local development

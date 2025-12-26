@@ -187,8 +187,8 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 					// Redis credentials for worker
 					UPSTASH_REDIS_REST_URL: config.redisUrl,
 					UPSTASH_REDIS_REST_TOKEN: config.redisToken,
-					// Webhook base URL
-					WEBHOOK_URL: `${config.webhookBaseUrl}/webhooks/job-complete`,
+					// Webhook base URL (RPC client constructs full path)
+					WEBHOOK_URL: config.webhookBaseUrl,
 				},
 				guest: {
 					cpu_kind: "shared",
