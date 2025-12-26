@@ -5,7 +5,13 @@
  * Leases track worker state and enable dead worker detection.
  */
 
-import { Console, Effect } from "effect";
+import { Effect } from "effect";
+import {
+	LoggerService,
+	logLeaseCleanup,
+	logLeaseInitialized,
+	logLeaseStateUpdate,
+} from "../../packages/logger";
 import { type RedisError, RedisService, redisEffect } from "./redis-client";
 
 // =============================================================================
@@ -46,8 +52,9 @@ export interface WorkerState {
  * Initialize worker in machine pool.
  * Updates pool entry to "running" state and sets lastActiveAt.
  */
-export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: number }, RedisError, RedisService> =>
+export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: number }, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 		const now = Date.now();
 
@@ -95,7 +102,7 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 			}),
 		});
 
-		yield* Console.log("[Worker] Initialized in pool as running");
+		yield* logLeaseInitialized(logger, machineId);
 
 		return { startedAt };
 	});
@@ -103,8 +110,9 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 /**
  * Update machine state in pool (running when processing, idle when waiting).
  */
-export const updateMachineState = (machineId: string, state: "running" | "idle"): Effect.Effect<void, RedisError, RedisService> =>
+export const updateMachineState = (machineId: string, state: "running" | "idle"): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 		const now = Date.now();
 
@@ -143,14 +151,17 @@ export const updateMachineState = (machineId: string, state: "running" | "idle")
 				}),
 			}),
 		);
+
+		yield* logLeaseStateUpdate(logger, machineId, state);
 	});
 
 /**
  * Cleanup worker on exit (mark as stopped in pool).
  * Note: The machine itself will be stopped by the cron job when idle.
  */
-export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError, RedisService> =>
+export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 		const now = Date.now();
 
@@ -191,7 +202,7 @@ export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError
 			}),
 		);
 
-		yield* Console.log("[Worker] Cleaned up, marked as stopped in pool");
+		yield* logLeaseCleanup(logger, machineId);
 	});
 
 /**

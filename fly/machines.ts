@@ -9,9 +9,15 @@
  * 5. Billing only for execution time
  */
 
-import { Context, Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { flyClient } from "./fly-client";
 import type { CreateMachineRequest, Machine } from "./fly-machine-apis";
+import {
+	LoggerService,
+	logMachineCreated,
+	logMachineStatus,
+	makeLoggerLayer,
+} from "../packages/logger";
 
 // Configuration
 interface FlyConfig {
@@ -51,6 +57,7 @@ type FlyApiError =
 // Create ephemeral machine for transcoding job
 const createTranscodeMachine = (job: TranscodeJob) =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const config = yield* FlyConfigService;
 		const apiToken = job.apiToken;
 
@@ -108,7 +115,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 					},
 				}),
 			catch: (e) => {
-				if (
+				const error: FlyApiError =
 					e &&
 					typeof e === "object" &&
 					"response" in e &&
@@ -116,34 +123,53 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 					typeof e.response === "object" &&
 					"status" in e.response &&
 					"data" in e.response
-				) {
-					return {
-						_tag: "HttpError",
-						status: e.response.status as number,
-						body: typeof e.response.data === "string" ? e.response.data : JSON.stringify(e.response.data),
-					} as FlyApiError;
-				}
-				return {
-					_tag: "HttpError",
-					status: 0,
-					body: typeof e === "string" ? e : "Network error",
-				} as FlyApiError;
+						? {
+								_tag: "HttpError",
+								status: e.response.status as number,
+								body:
+									typeof e.response.data === "string"
+										? e.response.data
+										: JSON.stringify(e.response.data),
+							}
+						: {
+								_tag: "HttpError",
+								status: 0,
+								body: typeof e === "string" ? e : "Network error",
+							};
+
+				return error;
 			},
-		});
+		}).pipe(
+			Effect.tapError((error) =>
+				logger.error("Failed to create machine", error, {
+					jobId: job.jobId,
+					error: error._tag === "HttpError" ? `HTTP ${error.status}: ${error.body}` : String(error),
+				}),
+			),
+		);
 
 		if (!machine.data?.id) {
-			return yield* Effect.fail({
+			const error: FlyApiError = {
 				_tag: "InvalidMachineResponse",
 				raw: machine.data,
-			} as FlyApiError);
+			};
+			yield* logger.error("Invalid machine response", undefined, {
+				jobId: job.jobId,
+				raw: machine.data,
+			});
+			return yield* Effect.fail(error);
 		}
 
-		return machine.data as Machine;
+		const createdMachine = machine.data as Machine;
+		yield* logMachineCreated(logger, createdMachine.id, config.region);
+
+		return createdMachine;
 	});
 
 // Get machine status
 const getMachineStatus = (machineId: string, apiToken: string) =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const config = yield* FlyConfigService;
 
 		const machine = yield* Effect.tryPromise({
@@ -161,7 +187,7 @@ const getMachineStatus = (machineId: string, apiToken: string) =>
 					},
 				),
 			catch: (e) => {
-				if (
+				const error: FlyApiError =
 					e &&
 					typeof e === "object" &&
 					"response" in e &&
@@ -169,34 +195,53 @@ const getMachineStatus = (machineId: string, apiToken: string) =>
 					typeof e.response === "object" &&
 					"status" in e.response &&
 					"data" in e.response
-				) {
-					return {
-						_tag: "HttpError",
-						status: e.response.status as number,
-						body: typeof e.response.data === "string" ? e.response.data : JSON.stringify(e.response.data),
-					} as FlyApiError;
-				}
-				return {
-					_tag: "HttpError",
-					status: 0,
-					body: typeof e === "string" ? e : "Network error",
-				} as FlyApiError;
+						? {
+								_tag: "HttpError",
+								status: e.response.status as number,
+								body:
+									typeof e.response.data === "string"
+										? e.response.data
+										: JSON.stringify(e.response.data),
+							}
+						: {
+								_tag: "HttpError",
+								status: 0,
+								body: typeof e === "string" ? e : "Network error",
+							};
+
+				return error;
 			},
-		});
+		}).pipe(
+			Effect.tapError((error) =>
+				logger.error("Failed to get machine status", error, {
+					machineId,
+					error: error._tag === "HttpError" ? `HTTP ${error.status}: ${error.body}` : String(error),
+				}),
+			),
+		);
 
 		if (!machine.data?.id) {
-			return yield* Effect.fail({
+			const error: FlyApiError = {
 				_tag: "InvalidMachineResponse",
 				raw: machine.data,
-			} as FlyApiError);
+			};
+			yield* logger.error("Invalid machine status response", undefined, {
+				machineId,
+				raw: machine.data,
+			});
+			return yield* Effect.fail(error);
 		}
 
-		return machine.data as Machine;
+		const statusMachine = machine.data as Machine;
+		yield* logMachineStatus(logger, statusMachine.id, statusMachine.state);
+
+		return statusMachine;
 	});
 
 // Wait for machine to complete
 const waitForCompletion = (machineId: string, apiToken: string) =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		let attempts = 0;
 		const maxAttempts = 120;
 
@@ -204,12 +249,22 @@ const waitForCompletion = (machineId: string, apiToken: string) =>
 			const status = yield* getMachineStatus(machineId, apiToken);
 
 			if (status.state === "stopped" || status.state === "destroyed") {
+				yield* logMachineStatus(logger, status.id, status.state, {
+					attempts,
+					event: "machine.completed",
+				});
 				return status;
 			}
 
 			yield* Effect.sleep("5 seconds");
 			attempts++;
 		}
+
+		yield* logger.error("Job timeout waiting for machine completion", undefined, {
+			machineId,
+			attempts,
+			maxAttempts,
+		});
 
 		return yield* Effect.fail({
 			_tag: "JobTimeout",
@@ -221,11 +276,17 @@ export const executeTranscodeJob = (job: TranscodeJob) =>
 	Effect.gen(function* () {
 		// Create and start machine
 		const machine = yield* createTranscodeMachine(job);
-		yield* Effect.log(`Machine created: ${machine.id}`);
 
 		// Wait for completion
 		const completed = yield* waitForCompletion(machine.id, job.apiToken);
-		yield* Effect.log(`Machine ${completed.state}: ${completed.id}`);
 
 		return completed;
+	});
+
+/**
+ * Create logger layer for fly-machines component
+ */
+export const makeFlyMachinesLoggerLayer = () =>
+	makeLoggerLayer({
+		component: "fly-machines",
 	});

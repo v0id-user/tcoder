@@ -11,7 +11,8 @@
  * - Handle authentication if needed
  */
 
-import { Console, Context, Effect, Layer, pipe } from "effect";
+import { Context, Effect, Layer, pipe } from "effect";
+import { LoggerService, logWebhookError, logWebhookNotification } from "../../packages/logger";
 
 // Webhook payload structure
 export interface WebhookPayload {
@@ -31,7 +32,7 @@ export interface WebhookPayload {
 export class WebhookClientService extends Context.Tag("WebhookClientService")<
 	WebhookClientService,
 	{
-		notify: (payload: WebhookPayload) => Effect.Effect<void, WebhookError, never>;
+		notify: (payload: WebhookPayload) => Effect.Effect<void, WebhookError, LoggerService>;
 	}
 >() {}
 
@@ -52,13 +53,16 @@ const getWebhookUrl = Effect.sync((): string => {
 
 // Mock webhook notification implementation
 // TODO: Replace with actual HTTP client
-const sendWebhook = (payload: WebhookPayload): Effect.Effect<void, WebhookError, never> =>
+const sendWebhook = (payload: WebhookPayload): Effect.Effect<void, WebhookError, LoggerService> =>
 	pipe(
 		Effect.gen(function* () {
+			const logger = yield* LoggerService;
 			const webhookUrl = yield* getWebhookUrl;
 
-			yield* Console.log(`[Webhook] Sending notification to ${webhookUrl}`);
-			yield* Console.log(`[Webhook] Payload: ${JSON.stringify(payload, null, 2)}`);
+			yield* logger.debug("Sending webhook notification", {
+				webhookUrl,
+				payload,
+			});
 
 			// TODO: Implement actual HTTP POST with Effect HTTP client
 			// For now, use fetch wrapped in Effect
@@ -105,7 +109,15 @@ const sendWebhook = (payload: WebhookPayload): Effect.Effect<void, WebhookError,
 				},
 			});
 
-			yield* Console.log(`[Webhook] Notification sent successfully (${response.status})`);
+			yield* logWebhookNotification(logger, webhookUrl, payload.jobId, payload.status, response.status);
+		}),
+		Effect.catchAll((error) => {
+			return Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				const webhookUrl = yield* getWebhookUrl;
+				yield* logWebhookError(logger, webhookUrl, payload.jobId, error);
+				return yield* Effect.fail(error);
+			});
 		}),
 		Effect.asVoid,
 	);

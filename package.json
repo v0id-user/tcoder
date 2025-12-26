@@ -2,7 +2,7 @@
 	"name": "tcoder",
 	"version": "0.0.0",
 	"private": true,
-	"workspaces": ["fly"],
+	"workspaces": ["fly", "packages/*"],
 	"scripts": {
 		"dev": "bun run scripts/dev-runner.ts",
 		"fly-worker:build": "docker-compose build fly-worker",
@@ -47,7 +47,7 @@
 		"@types/node": "^25.0.3",
 		"@upstash/redis": "^1.36.0",
 		"effect": "^3.19.13",
-		"hono": "^4.11.2",
+		"hono": "^4.11.3",
 		"tsdown": "^0.18.3",
 		"zod": "^3.25.76"
 	}

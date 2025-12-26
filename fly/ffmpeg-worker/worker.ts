@@ -17,7 +17,16 @@
 
 import { unlink } from "node:fs/promises";
 import { $ } from "bun";
-import { Console, Effect, Exit, Layer } from "effect";
+import { Effect, Exit, Layer } from "effect";
+import {
+	LoggerService,
+	logJobCompleted,
+	logJobFailed,
+	logJobStarted,
+	logWorkerStarted,
+	logWorkerStopped,
+	makeLoggerLayer,
+} from "../../packages/logger";
 import { LEASE_CONFIG, cleanupWorker, completeJob, failJob, getJobData, initializeWorker, popJob, updateMachineState } from "./lease";
 import { R2ClientService, extractR2Key, getTempFilePath } from "./r2-client";
 import { makeR2ClientLayer } from "./r2-client";
@@ -85,24 +94,28 @@ const getFFmpegArgs = (config: JobConfig, localInputPath: string, localOutputPat
 
 const downloadInput = (inputUrl: string, localInputPath: string) =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const r2Client = yield* R2ClientService;
-		yield* Console.log(`[Download] ${inputUrl}`);
+		yield* logger.debug("Downloading input", { inputUrl, localInputPath });
 		yield* r2Client.download(inputUrl, localInputPath);
 	});
 
 const runFFmpeg = (args: string[]) =>
 	Effect.gen(function* () {
-		yield* Console.log("[FFmpeg] Starting transcoding...");
+		const logger = yield* LoggerService;
+		yield* logger.info("Starting FFmpeg transcoding", { args: args.join(" ") });
 		yield* Effect.tryPromise({
 			try: async () => {
 				await $`ffmpeg ${args}`.quiet();
 			},
 			catch: (e) => new Error(`FFmpeg failed: ${e instanceof Error ? e.message : String(e)}`),
 		});
+		yield* logger.debug("FFmpeg transcoding completed");
 	});
 
 const uploadOutputs = (config: JobConfig, localOutputPaths: string[]) =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const r2Client = yield* R2ClientService;
 		const outputs: OutputFile[] = [];
 
@@ -113,7 +126,7 @@ const uploadOutputs = (config: JobConfig, localOutputPaths: string[]) =>
 			const ext = localPath.match(/\.([^.]+)$/)?.[1] || "mp4";
 			const r2Key = config.outputQualities ? `${baseR2Key.replace(/\.[^/.]+$/, "")}-${quality}.${ext}` : baseR2Key;
 
-			yield* Console.log(`[Upload] ${quality} -> ${r2Key}`);
+			yield* logger.debug("Uploading output", { quality, r2Key, localPath });
 			const r2Url = yield* r2Client.upload(localPath, r2Key, {
 				quality,
 				preset: config.preset,
@@ -155,13 +168,13 @@ const cleanupFiles = (paths: string[]) =>
  */
 const processJob = (jobId: string) =>
 	Effect.gen(function* () {
-		yield* Console.log(`\n📦 Processing job: ${jobId}`);
+		const logger = yield* LoggerService;
 		const startTime = Date.now();
 
 		// Get job data from Redis
 		const jobData = yield* getJobData(jobId);
 		if (!jobData) {
-			yield* Console.error(`Job ${jobId} not found in Redis`);
+			yield* logger.error("Job not found in Redis", undefined, { jobId });
 			return;
 		}
 
@@ -174,14 +187,17 @@ const processJob = (jobId: string) =>
 			outputQualities: jobData.outputQualities?.split(","),
 		};
 
+		// Create scoped logger with jobId context
+		const jobLogger = logger.withContext({ jobId }) as unknown as typeof logger;
+
+		yield* logJobStarted(jobLogger, config.jobId, config.inputUrl, config.preset);
+
 		const localInputPath = getTempFilePath(jobId, "input.mp4");
 		const localOutputPaths = config.outputQualities
 			? config.outputQualities.map((q) => getTempFilePath(jobId, `output-${q}.mp4`))
 			: [getTempFilePath(jobId, "output.mp4")];
 
-		let outputs: OutputFile[] = [];
-
-		try {
+		const result = yield* Effect.gen(function* () {
 			// Download
 			yield* downloadInput(config.inputUrl, localInputPath);
 
@@ -190,24 +206,40 @@ const processJob = (jobId: string) =>
 			yield* runFFmpeg(args);
 
 			// Upload
-			outputs = yield* uploadOutputs(config, localOutputPaths);
+			const outputs = yield* uploadOutputs(config, localOutputPaths);
 
-			const duration = (Date.now() - startTime) / 1000;
-			yield* Console.log(`✅ Job ${jobId} completed in ${duration.toFixed(1)}s`);
+			return outputs;
+		}).pipe(
+			Effect.match({
+				onFailure: (error) => {
+					const errorMessage = error instanceof Error ? error.message : String(error);
+					const duration = (Date.now() - startTime) / 1000;
+					return Effect.gen(function* () {
+						yield* logJobFailed(jobLogger, config.jobId, errorMessage, duration);
+						yield* failJob(jobId, errorMessage);
+						yield* notifyWebhook(config, [], duration, errorMessage);
+					});
+				},
+				onSuccess: (outputs) => {
+					const duration = (Date.now() - startTime) / 1000;
+					return Effect.gen(function* () {
+						yield* logJobCompleted(
+							jobLogger,
+							config.jobId,
+							duration,
+							outputs.map((o) => ({ quality: o.quality, url: o.r2Url })),
+						);
+						yield* completeJob(jobId, duration);
+						yield* notifyWebhook(config, outputs, duration);
+					});
+				},
+			}),
+		);
 
-			// Update Redis + webhook
-			yield* completeJob(jobId, duration);
-			yield* notifyWebhook(config, outputs, duration);
-		} catch (e) {
-			const error = e instanceof Error ? e.message : String(e);
-			const duration = (Date.now() - startTime) / 1000;
-			yield* Console.error(`❌ Job ${jobId} failed: ${error}`);
+		// Cleanup files
+		yield* cleanupFiles([localInputPath, ...localOutputPaths]);
 
-			yield* failJob(jobId, error);
-			yield* notifyWebhook(config, outputs, duration, error);
-		} finally {
-			yield* cleanupFiles([localInputPath, ...localOutputPaths]);
-		}
+		return result;
 	});
 
 // =============================================================================
@@ -215,14 +247,16 @@ const processJob = (jobId: string) =>
 // =============================================================================
 
 const workerLoop = Effect.gen(function* () {
+	const logger = yield* LoggerService;
 	const machineId = process.env.FLY_MACHINE_ID || `local-${Date.now()}`;
-	yield* Console.log(`🎬 Worker ${machineId} starting (indefinite polling)`);
+
+	yield* logWorkerStarted(logger, machineId);
 
 	// Initialize worker in pool
 	const { startedAt } = yield* initializeWorker(machineId);
 	let jobsProcessed = 0;
 
-	try {
+	const loop = Effect.gen(function* () {
 		// Poll indefinitely until stopped externally
 		while (true) {
 			// Pop job from queue
@@ -231,7 +265,9 @@ const workerLoop = Effect.gen(function* () {
 			if (!jobId) {
 				// No jobs available, mark as idle and wait
 				yield* updateMachineState(machineId, "idle");
-				yield* Console.log(`[Worker] Queue empty, waiting ${LEASE_CONFIG.POLL_INTERVAL_MS / 1000}s...`);
+				yield* logger.debug("Queue empty, waiting", {
+					pollInterval: LEASE_CONFIG.POLL_INTERVAL_MS / 1000,
+				});
 				yield* Effect.sleep(`${LEASE_CONFIG.POLL_INTERVAL_MS} millis`);
 				continue;
 			}
@@ -245,27 +281,47 @@ const workerLoop = Effect.gen(function* () {
 
 			// Update state after job (will be set to idle on next iteration if no job)
 		}
-	} catch (e) {
-		yield* Console.error(`[Worker] Error in worker loop: ${e instanceof Error ? e.message : String(e)}`);
-		throw e;
-	} finally {
-		// Cleanup on exit
-		yield* cleanupWorker(machineId);
-		yield* Console.log(`\n🏁 Worker exiting: ${jobsProcessed} jobs processed`);
-	}
+	});
+
+	yield* loop.pipe(
+		Effect.catchAll((error) => {
+			return Effect.gen(function* () {
+				yield* logger.error("Error in worker loop", error, {
+					machineId,
+					jobsProcessed,
+				});
+				return yield* Effect.fail(error);
+			});
+		}),
+		Effect.ensuring(
+			Effect.gen(function* () {
+				// Cleanup on exit
+				yield* cleanupWorker(machineId).pipe(Effect.catchAll(() => Effect.void));
+				yield* logWorkerStopped(logger, machineId, jobsProcessed);
+			}),
+		),
+	);
 });
 
 // =============================================================================
 // Entry Point
 // =============================================================================
 
-const program = workerLoop.pipe(Effect.provide(Layer.mergeAll(makeRedisLayer, makeR2ClientLayer, makeWebhookClientLayer)));
+const machineId = process.env.FLY_MACHINE_ID || `local-${Date.now()}`;
+const loggerLayer = makeLoggerLayer({
+	component: "ffmpeg-worker",
+	machineId,
+});
+
+const program = workerLoop.pipe(
+	Effect.provide(Layer.mergeAll(loggerLayer, makeRedisLayer, makeR2ClientLayer, makeWebhookClientLayer)),
+);
 
 Effect.runPromiseExit(program).then((exit) => {
 	if (Exit.isSuccess(exit)) {
-		console.log("Worker exiting successfully");
 		process.exit(0);
 	} else {
+		// Use console.error here as this is the runtime boundary
 		console.error("Worker failed:", exit.cause);
 		process.exit(1);
 	}

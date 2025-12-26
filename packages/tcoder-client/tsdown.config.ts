@@ -7,12 +7,7 @@ export default defineConfig({
   format: ["esm", "cjs"],
   outDir: "dist",
   dts: true,
-  minify: {
-    compress: {
-      dropDebugger: true,
-      dropConsole: true,
-    },
-  },
+  minify: true,
   sourcemap: false,
   platform: "node",
   treeshake: true,
