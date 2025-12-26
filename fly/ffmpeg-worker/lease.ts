@@ -291,19 +291,33 @@ export const getJobData = (jobId: string): Effect.Effect<Record<string, string> 
 	});
 
 /**
- * Mark job as completed.
+ * Job output structure for persistence.
  */
-export const completeJob = (jobId: string, duration: number): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
+export interface JobOutput {
+	readonly quality: string;
+	readonly url: string;
+}
+
+/**
+ * Mark job as completed.
+ * Saves outputs directly to Redis for reliability (webhook is a backup).
+ */
+export const completeJob = (
+	jobId: string,
+	duration: number,
+	outputs?: JobOutput[],
+): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 		const startTime = Date.now();
-		yield* logger.debug("[completeJob] Entering", { jobId, duration });
+		yield* logger.debug("[completeJob] Entering", { jobId, duration, outputCount: outputs?.length ?? 0 });
 		const pipe = client.pipeline();
 		pipe.hset(RedisKeys.jobStatus(jobId), {
 			status: "completed",
 			completedAt: String(Date.now()),
 			duration: String(duration),
+			...(outputs && outputs.length > 0 && { outputs: JSON.stringify(outputs) }),
 		});
 		pipe.hdel(RedisKeys.jobsActive, jobId);
 
@@ -315,7 +329,7 @@ export const completeJob = (jobId: string, duration: number): Effect.Effect<void
 			}),
 		});
 		const execDuration = Date.now() - startTime;
-		yield* logger.debug("[completeJob] Exiting", { jobId, duration, execDuration: `${execDuration}ms` });
+		yield* logger.debug("[completeJob] Exiting", { jobId, duration, outputCount: outputs?.length ?? 0, execDuration: `${execDuration}ms` });
 	});
 
 /**

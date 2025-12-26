@@ -264,14 +264,11 @@ const processJob = (jobId: string) =>
 				},
 				onSuccess: (outputs) => {
 					const duration = (Date.now() - startTime) / 1000;
+					const jobOutputs = outputs.map((o) => ({ quality: o.quality, url: o.r2Url }));
 					return Effect.gen(function* () {
-						yield* logJobCompleted(
-							jobLogger,
-							config.jobId,
-							duration,
-							outputs.map((o) => ({ quality: o.quality, url: o.r2Url })),
-						);
-						yield* completeJob(jobId, duration);
+						yield* logJobCompleted(jobLogger, config.jobId, duration, jobOutputs);
+						// Save outputs directly to Redis for reliability (webhook is a backup)
+						yield* completeJob(jobId, duration, jobOutputs);
 						yield* notifyWebhook(config, outputs, duration);
 					});
 				},
