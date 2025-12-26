@@ -9,9 +9,9 @@
  * 5. Billing only for execution time
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect } from "effect";
 import { flyClient } from "./fly-client";
-import type { CreateMachineRequest, Machine } from "./fly-machine-apis";
+import type { Components, Machine, Paths } from "./fly-machine-apis";
 import { LoggerService, logMachineCreated, logMachineStatus, makeLoggerLayer } from "../packages/logger";
 
 // Configuration
@@ -83,7 +83,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 			}
 		}
 
-		const request: CreateMachineRequest = {
+		const request: Paths.MachinesCreate.RequestBody = {
 			name: `ffmpeg-${job.jobId}`,
 			region: config.region,
 			config: {
@@ -94,6 +94,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 					cpu_kind: "shared",
 					cpus: 1,
 					memory_mb: 512,
+					persist_rootfs: "never"
 				},
 				restart: {
 					policy: "no",
@@ -152,8 +153,8 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 			return yield* Effect.fail(error);
 		}
 
-		const createdMachine = machine.data as Machine;
-		yield* logMachineCreated(logger, createdMachine.id, config.region);
+		const createdMachine = machine.data as Components.Schemas.Machine;
+		yield* logMachineCreated(logger, createdMachine.instance_id ?? "Machine was created with no instance id", config.region);
 
 		return createdMachine;
 	});
@@ -265,9 +266,13 @@ export const executeTranscodeJob = (job: TranscodeJob) =>
 	Effect.gen(function* () {
 		// Create and start machine
 		const machine = yield* createTranscodeMachine(job);
+		if (machine.instance_id === undefined){
+			// TODO: make it an effect layer error and handle it more gracefully
+			throw new Error("Machine was created with no instance id")
+		}
 
 		// Wait for completion
-		const completed = yield* waitForCompletion(machine.id, job.apiToken);
+		const completed = yield* waitForCompletion(machine.instance_id, job.apiToken);
 
 		return completed;
 	});
