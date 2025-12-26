@@ -27,6 +27,7 @@ import {
 	logWorkerStarted,
 	logWorkerStopped,
 	makeLoggerLayer,
+	makeEffectLoggerLayer,
 } from "../../packages/logger";
 import { LEASE_CONFIG, cleanupWorker, completeJob, failJob, getJobData, initializeWorker, popJob, updateMachineState } from "./lease";
 import { R2ClientService, extractR2Key, getTempFilePath } from "./r2-client";
@@ -369,8 +370,11 @@ const loggerLayer = makeLoggerLayer({
 	machineId,
 	logLevel,
 });
+const effectLoggerLayer = makeEffectLoggerLayer(logLevel);
 
-const program = workerLoop.pipe(Effect.provide(Layer.mergeAll(loggerLayer, makeRedisLayer, makeR2ClientLayer, makeWebhookClientLayer)));
+const program = workerLoop.pipe(
+	Effect.provide(Layer.mergeAll(loggerLayer, effectLoggerLayer, makeRedisLayer, makeR2ClientLayer, makeWebhookClientLayer)),
+);
 
 Effect.runPromiseExit(program).then((exit) => {
 	if (Exit.isSuccess(exit)) {

@@ -5,7 +5,7 @@
  * Supports log levels, metadata, and scoped loggers for components, machines, and jobs.
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Logger, LogLevel } from "effect";
 
 // =============================================================================
 // Types
@@ -180,6 +180,38 @@ const createLogger = (config: LoggerConfig): LoggerImpl => {
 
 export const makeLoggerLayer = (config: LoggerConfig): Layer.Layer<LoggerService> =>
 	Layer.succeed(LoggerService, createLogger(config) as unknown as LoggerServiceType);
+
+// =============================================================================
+// Effect Logger Configuration
+// =============================================================================
+
+/**
+ * Maps custom log levels to Effect's log levels.
+ */
+const mapToEffectLogLevel = (level: LogLevel): LogLevel.LogLevel => {
+	switch (level) {
+		case "debug":
+			return LogLevel.Debug;
+		case "info":
+			return LogLevel.Info;
+		case "warn":
+			return LogLevel.Warning;
+		case "error":
+			return LogLevel.Error;
+		default:
+			return LogLevel.Info;
+	}
+};
+
+/**
+ * Creates an Effect logger layer configured with the minimum log level.
+ * This ensures that Effect's runtime logger respects the LOG_LEVEL configuration
+ * and doesn't filter out debug/warn/error logs.
+ */
+export const makeEffectLoggerLayer = (logLevel: LogLevel): Layer.Layer<never> => {
+	const effectLogLevel = mapToEffectLogLevel(logLevel);
+	return Logger.minimumLogLevel(effectLogLevel);
+};
 
 // =============================================================================
 // Helper Functions for Common Logging Scenarios
