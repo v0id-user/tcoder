@@ -9,16 +9,25 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy package files for dependency caching
+# Copy workspace root files (needed for Bun workspace resolution)
 COPY package.json bun.lock ./
 
-# Install dependencies
+# Copy workspace package that fly depends on
+COPY packages/logger packages/logger/
+
+# Copy fly package.json
+COPY fly/package.json fly/
+
+# Install dependencies (Bun will resolve workspace dependencies)
 RUN bun install
 
-# Copy application code
-COPY . .
+# Copy fly application code
+COPY fly/ fly/
 
 # No EXPOSE - this is not a web server
+
+# Set working directory to fly for execution
+WORKDIR /app/fly
 
 # Entry point for one-shot FFmpeg jobs
 # Job parameters passed via environment variables

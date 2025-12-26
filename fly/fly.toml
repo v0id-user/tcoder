@@ -6,4 +6,5 @@ app = 'fly-tcoder-ffmpeg-worker-31657fa'
 primary_region = 'fra'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "fly/Dockerfile"
+  context = ".."

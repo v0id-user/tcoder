@@ -26,8 +26,8 @@ services:
 
   fly-worker:
     build:
-      context: ./fly
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: fly/Dockerfile
     container_name: tcoder-fly-worker
     environment:
       # Local SRH emulates Upstash HTTP API
