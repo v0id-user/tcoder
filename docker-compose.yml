@@ -37,6 +37,8 @@ services:
       WEBHOOK_URL: http://host.docker.internal:8787/webhooks/job-complete
       # Local dev machine ID
       FLY_MACHINE_ID: local-dev-worker
+      # Debug logging for local development
+      LOG_LEVEL: debug
     env_file:
       - .env
     extra_hosts:
