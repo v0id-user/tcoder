@@ -1,25 +1,25 @@
 {
-  "name": "tcoder-client",
-  "version": "0.1.0",
-  "module": "src/index.ts",
-  "type": "module",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "scripts": {
-    "build": "tsdown"
-  },
-  "dependencies": {
-    "effect": "^3.19.13",
-    "hono": "^4.11.2"
-  },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "tsdown": "^0.2.0"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  }
+	"name": "tcoder-client",
+	"version": "0.1.0",
+	"module": "src/index.ts",
+	"type": "module",
+	"main": "src/index.ts",
+	"types": "src/index.ts",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"build": "tsdown"
+	},
+	"dependencies": {
+		"effect": "^3.19.13",
+		"hono": "^4.11.2"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"tsdown": "^0.2.0"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	}
 }

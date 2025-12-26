@@ -6,12 +6,7 @@
  */
 
 import { Effect } from "effect";
-import {
-	LoggerService,
-	logLeaseCleanup,
-	logLeaseInitialized,
-	logLeaseStateUpdate,
-} from "../../packages/logger";
+import { LoggerService, logLeaseCleanup, logLeaseInitialized, logLeaseStateUpdate } from "../../packages/logger";
 import { type RedisError, RedisService, redisEffect } from "./redis-client";
 
 // =============================================================================
@@ -110,7 +105,10 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 /**
  * Update machine state in pool (running when processing, idle when waiting).
  */
-export const updateMachineState = (machineId: string, state: "running" | "idle"): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
+export const updateMachineState = (
+	machineId: string,
+	state: "running" | "idle",
+): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;

@@ -38,4 +38,3 @@ export const webhookPayloadSchema = z.object({
 	error: z.string().optional(),
 	duration: z.number().optional(),
 });
-

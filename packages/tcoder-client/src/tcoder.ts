@@ -164,9 +164,7 @@ export class TcoderClient {
 					catch: (error) => new UploadError("Failed to read error response", error),
 				}).pipe(Effect.orElse(() => Effect.succeed("Unknown error")));
 
-				return yield* Effect.fail(
-					new UploadError(`Upload request failed: ${uploadRequest.status} ${errorText}`),
-				);
+				return yield* Effect.fail(new UploadError(`Upload request failed: ${uploadRequest.status} ${errorText}`));
 			}
 
 			const uploadData = yield* Effect.tryPromise({
@@ -193,9 +191,7 @@ export class TcoderClient {
 					catch: (error) => new UploadError("Failed to read error response", error),
 				}).pipe(Effect.orElse(() => Effect.succeed("Unknown error")));
 
-				return yield* Effect.fail(
-					new UploadError(`R2 upload failed: ${uploadResponse.status} ${errorText}`),
-				);
+				return yield* Effect.fail(new UploadError(`R2 upload failed: ${uploadResponse.status} ${errorText}`));
 			}
 
 			// Step 3: Return job ID
@@ -241,9 +237,7 @@ export class TcoderClient {
 					catch: (error) => new StatusError("Failed to read error response", error),
 				}).pipe(Effect.orElse(() => Effect.succeed("Unknown error")));
 
-				return yield* Effect.fail(
-					new StatusError(`Status request failed: ${response.status} ${errorText}`),
-				);
+				return yield* Effect.fail(new StatusError(`Status request failed: ${response.status} ${errorText}`));
 			}
 
 			const jobStatus = yield* Effect.tryPromise({
@@ -255,4 +249,3 @@ export class TcoderClient {
 		});
 	}
 }
-

@@ -11,7 +11,7 @@
 	},
 	"linter": {
 		"enabled": true,
-		"ignore": [".wrangler/**", "**/*.d.ts", "node_modules/**"],
+		"ignore": [".wrangler/**", "**/*.d.ts", "**/*.d.mts", "**/*.d.cts", "dist/**", "node_modules/**"],
 		"rules": {
 			"recommended": true
 		}

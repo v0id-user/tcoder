@@ -7,7 +7,7 @@
  */
 
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { Readable } from "node:stream";
+import type { Readable } from "node:stream";
 import { readFile, writeFile } from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -235,10 +235,11 @@ const downloadFromR2 = (url: string, localPath: string): Effect.Effect<void, R2E
 			// Verify file was written and log
 			const fileStats = yield* Effect.tryPromise({
 				try: () => stat(localPath),
-				catch: () => ({
-					_tag: "FileNotFound" as const,
-					path: localPath,
-				} as R2Error),
+				catch: () =>
+					({
+						_tag: "FileNotFound" as const,
+						path: localPath,
+					}) as R2Error,
 			}).pipe(Effect.catchAll(() => Effect.succeed(null)));
 
 			const sizeBytes = fileStats?.size;

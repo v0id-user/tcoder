@@ -5,7 +5,7 @@
  * Supports log levels, metadata, and scoped loggers for components, machines, and jobs.
  */
 
-import { Context, Effect, Layer, pipe } from "effect";
+import { Context, Effect, Layer } from "effect";
 
 // =============================================================================
 // Types
@@ -35,16 +35,15 @@ export interface LogMetadata {
 // Logger Service
 // =============================================================================
 
-export class LoggerService extends Context.Tag("LoggerService")<
-	LoggerService,
-	{
-		info: (message: string, metadata?: LogMetadata) => Effect.Effect<void, never, never>;
-		warn: (message: string, metadata?: LogMetadata) => Effect.Effect<void, never, never>;
-		error: (message: string, error?: unknown, metadata?: LogMetadata) => Effect.Effect<void, never, never>;
-		debug: (message: string, metadata?: LogMetadata) => Effect.Effect<void, never, never>;
-		withContext: (context: Partial<LoggerContext>) => LoggerService;
-	}
->() {}
+type LoggerServiceType = {
+	info: (message: string, metadata?: LogMetadata) => Effect.Effect<void, never, never>;
+	warn: (message: string, metadata?: LogMetadata) => Effect.Effect<void, never, never>;
+	error: (message: string, error?: unknown, metadata?: LogMetadata) => Effect.Effect<void, never, never>;
+	debug: (message: string, metadata?: LogMetadata) => Effect.Effect<void, never, never>;
+	withContext: (context: Partial<LoggerContext>) => LoggerService;
+};
+
+export class LoggerService extends Context.Tag("LoggerService")<LoggerService, LoggerServiceType>() {}
 
 // =============================================================================
 // Log Level Priority
@@ -180,7 +179,7 @@ const createLogger = (config: LoggerConfig): LoggerImpl => {
 // =============================================================================
 
 export const makeLoggerLayer = (config: LoggerConfig): Layer.Layer<LoggerService> =>
-	Layer.succeed(LoggerService, createLogger(config) as any);
+	Layer.succeed(LoggerService, createLogger(config) as unknown as LoggerServiceType);
 
 // =============================================================================
 // Helper Functions for Common Logging Scenarios
@@ -189,11 +188,7 @@ export const makeLoggerLayer = (config: LoggerConfig): Layer.Layer<LoggerService
 /**
  * Log machine creation event
  */
-export const logMachineCreated = (
-	logger: LoggerImpl,
-	machineId: string,
-	region: string,
-): Effect.Effect<void, never, never> =>
+export const logMachineCreated = (logger: LoggerImpl, machineId: string, region: string): Effect.Effect<void, never, never> =>
 	logger.info("Machine created", {
 		machineId,
 		region,
@@ -219,12 +214,7 @@ export const logMachineStatus = (
 /**
  * Log job processing started
  */
-export const logJobStarted = (
-	logger: LoggerImpl,
-	jobId: string,
-	inputUrl: string,
-	preset?: string,
-): Effect.Effect<void, never, never> =>
+export const logJobStarted = (logger: LoggerImpl, jobId: string, inputUrl: string, preset?: string): Effect.Effect<void, never, never> =>
 	logger.info("Job started", {
 		jobId,
 		inputUrl,
@@ -252,12 +242,7 @@ export const logJobCompleted = (
 /**
  * Log job failure
  */
-export const logJobFailed = (
-	logger: LoggerImpl,
-	jobId: string,
-	error: string,
-	duration: number,
-): Effect.Effect<void, never, never> =>
+export const logJobFailed = (logger: LoggerImpl, jobId: string, error: string, duration: number): Effect.Effect<void, never, never> =>
 	logger.error("Job failed", error, {
 		jobId,
 		duration,
@@ -276,11 +261,7 @@ export const logWorkerStarted = (logger: LoggerImpl, machineId: string): Effect.
 /**
  * Log worker stopped
  */
-export const logWorkerStopped = (
-	logger: LoggerImpl,
-	machineId: string,
-	jobsProcessed: number,
-): Effect.Effect<void, never, never> =>
+export const logWorkerStopped = (logger: LoggerImpl, machineId: string, jobsProcessed: number): Effect.Effect<void, never, never> =>
 	logger.info("Worker stopped", {
 		machineId,
 		jobsProcessed,
@@ -299,11 +280,7 @@ export const logLeaseInitialized = (logger: LoggerImpl, machineId: string): Effe
 /**
  * Log lease state update
  */
-export const logLeaseStateUpdate = (
-	logger: LoggerImpl,
-	machineId: string,
-	state: "running" | "idle",
-): Effect.Effect<void, never, never> =>
+export const logLeaseStateUpdate = (logger: LoggerImpl, machineId: string, state: "running" | "idle"): Effect.Effect<void, never, never> =>
 	logger.debug("Lease state updated", {
 		machineId,
 		state,
@@ -322,12 +299,7 @@ export const logLeaseCleanup = (logger: LoggerImpl, machineId: string): Effect.E
 /**
  * Log R2 download operation
  */
-export const logR2Download = (
-	logger: LoggerImpl,
-	url: string,
-	localPath: string,
-	sizeBytes?: number,
-): Effect.Effect<void, never, never> =>
+export const logR2Download = (logger: LoggerImpl, url: string, localPath: string, sizeBytes?: number): Effect.Effect<void, never, never> =>
 	logger.info("R2 download", {
 		url,
 		localPath,
@@ -376,12 +348,7 @@ export const logWebhookNotification = (
 /**
  * Log webhook error
  */
-export const logWebhookError = (
-	logger: LoggerImpl,
-	webhookUrl: string,
-	jobId: string,
-	error: unknown,
-): Effect.Effect<void, never, never> =>
+export const logWebhookError = (logger: LoggerImpl, webhookUrl: string, jobId: string, error: unknown): Effect.Effect<void, never, never> =>
 	logger.error("Webhook notification failed", error, {
 		webhookUrl,
 		jobId,

@@ -1,15 +1,15 @@
 {
-  "name": "logger",
-  "module": "index.ts",
-  "type": "module",
-  "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5.9.3"
-  },
-  "dependencies": {
-    "effect": "^3.19.13"
-  }
+	"name": "logger",
+	"module": "index.ts",
+	"type": "module",
+	"private": true,
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5.9.3"
+	},
+	"dependencies": {
+		"effect": "^3.19.13"
+	}
 }

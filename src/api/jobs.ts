@@ -13,72 +13,71 @@ const buildJobRoutes = () => {
 	/**
 	 * POST /jobs - Submit a new transcoding job (direct, without upload)
 	 */
-	const app = new Hono<{ Bindings: Env }>().post("/jobs", zValidator("json", submitJobSchema), async (c) => {
-		const body = c.req.valid("json");
-		const jobId = body.jobId || crypto.randomUUID();
-		const now = Date.now();
+	const app = new Hono<{ Bindings: Env }>()
+		.post("/jobs", zValidator("json", submitJobSchema), async (c) => {
+			const body = c.req.valid("json");
+			const jobId = body.jobId || crypto.randomUUID();
+			const now = Date.now();
 
-		try {
-			const redis = Redis.fromEnv(c.env);
+			try {
+				const redis = Redis.fromEnv(c.env);
 
-			const jobData: JobData = {
-				jobId,
-				status: "pending",
-				inputKey: "",
-				inputUrl: body.inputUrl,
-				outputUrl: body.outputUrl,
-				preset: body.preset,
-				webhookUrl: `${c.env.WEBHOOK_BASE_URL}/webhooks/job-complete`,
-				outputQualities: body.outputQualities,
-				timestamps: {
-					createdAt: now,
-					queuedAt: now,
-				},
-				retries: 0,
-				r2Config: body.r2Config,
-			};
-
-			const pipe = redis.pipeline();
-			pipe.hset(RedisKeys.jobStatus(jobId), serializeJobData(jobData));
-			pipe.expire(RedisKeys.jobStatus(jobId), RWOS_CONFIG.JOB_STATUS_TTL_SECONDS);
-			pipe.zadd(RedisKeys.jobsPending, { score: now, member: jobId });
-			await pipe.exec();
-
-			const redisLayer = makeRedisLayer(c.env);
-
-			const spawnConfig: SpawnConfig = {
-				flyApiToken: c.env.FLY_API_TOKEN,
-				flyAppName: c.env.FLY_APP_NAME,
-				flyRegion: c.env.FLY_REGION,
-				redisUrl: c.env.UPSTASH_REDIS_REST_URL,
-				redisToken: c.env.UPSTASH_REDIS_REST_TOKEN,
-				webhookBaseUrl: c.env.WEBHOOK_BASE_URL,
-			};
-
-			const spawned = await Effect.runPromise(
-				maybeSpawnWorker(spawnConfig).pipe(
-					Effect.catchAll(() => Effect.succeed(null)),
-					Effect.provide(redisLayer),
-				),
-			);
-
-			return c.json(
-				{
+				const jobData: JobData = {
 					jobId,
 					status: "pending",
-					machineId: spawned?.machineId || null,
-					queuedAt: now,
-				},
-				201,
-			);
-		} catch (error) {
-			console.error("[Route] Redis error in /jobs:", error);
-			return c.json({ error: "Redis connection failed" }, 500);
-		}
-	}).get(
-		"/jobs/:jobId",
-		zValidator("param", z.object({ jobId: z.string() })),
-		async (c) => {
+					inputKey: "",
+					inputUrl: body.inputUrl,
+					outputUrl: body.outputUrl,
+					preset: body.preset,
+					webhookUrl: `${c.env.WEBHOOK_BASE_URL}/webhooks/job-complete`,
+					outputQualities: body.outputQualities,
+					timestamps: {
+						createdAt: now,
+						queuedAt: now,
+					},
+					retries: 0,
+					r2Config: body.r2Config,
+				};
+
+				const pipe = redis.pipeline();
+				pipe.hset(RedisKeys.jobStatus(jobId), serializeJobData(jobData));
+				pipe.expire(RedisKeys.jobStatus(jobId), RWOS_CONFIG.JOB_STATUS_TTL_SECONDS);
+				pipe.zadd(RedisKeys.jobsPending, { score: now, member: jobId });
+				await pipe.exec();
+
+				const redisLayer = makeRedisLayer(c.env);
+
+				const spawnConfig: SpawnConfig = {
+					flyApiToken: c.env.FLY_API_TOKEN,
+					flyAppName: c.env.FLY_APP_NAME,
+					flyRegion: c.env.FLY_REGION,
+					redisUrl: c.env.UPSTASH_REDIS_REST_URL,
+					redisToken: c.env.UPSTASH_REDIS_REST_TOKEN,
+					webhookBaseUrl: c.env.WEBHOOK_BASE_URL,
+				};
+
+				const spawned = await Effect.runPromise(
+					maybeSpawnWorker(spawnConfig).pipe(
+						Effect.catchAll(() => Effect.succeed(null)),
+						Effect.provide(redisLayer),
+					),
+				);
+
+				return c.json(
+					{
+						jobId,
+						status: "pending",
+						machineId: spawned?.machineId || null,
+						queuedAt: now,
+					},
+					201,
+				);
+			} catch (error) {
+				console.error("[Route] Redis error in /jobs:", error);
+				return c.json({ error: "Redis connection failed" }, 500);
+			}
+		})
+		.get("/jobs/:jobId", zValidator("param", z.object({ jobId: z.string() })), async (c) => {
 			const { jobId } = c.req.valid("param");
 			try {
 				const redis = Redis.fromEnv(c.env);
@@ -108,8 +107,7 @@ const buildJobRoutes = () => {
 				console.error("[Route] Redis error in GET /jobs/:jobId:", error);
 				return c.json({ error: "Redis connection failed" }, 500);
 			}
-		},
-	);
+		});
 
 	return app;
 };
@@ -117,4 +115,3 @@ const buildJobRoutes = () => {
 export const createJobRoutes = (): ReturnType<typeof buildJobRoutes> => {
 	return buildJobRoutes();
 };
-

@@ -10,74 +10,76 @@ const buildStatsRoutes = () => {
 	/**
 	 * GET /stats - Get system stats
 	 */
-	const app = new Hono<{ Bindings: Env }>().get("/stats", async (c) => {
-		try {
-			const redisLayer = makeRedisLayer(c.env);
+	const app = new Hono<{ Bindings: Env }>()
+		.get("/stats", async (c) => {
+			try {
+				const redisLayer = makeRedisLayer(c.env);
+				const redis = Redis.fromEnv(c.env);
+
+				const stats = await Effect.runPromise(
+					Effect.gen(function* () {
+						const admission = yield* getAdmissionStats();
+						return admission;
+					}).pipe(Effect.provide(redisLayer)),
+				);
+
+				const pendingCount = await redis.zcard(RedisKeys.jobsPending);
+				const activeJobs = await redis.hgetall<Record<string, string>>(RedisKeys.jobsActive);
+
+				return c.json({
+					machines: stats,
+					pendingJobs: pendingCount,
+					activeJobs: activeJobs ? Object.keys(activeJobs).length : 0,
+					activeJobIds: activeJobs ? Object.keys(activeJobs) : [],
+				});
+			} catch (error) {
+				console.error("[Route] Redis error in /stats:", error);
+				return c.json({ error: "Redis connection failed" }, 500);
+			}
+		})
+		.get("/status", async (c) => {
 			const redis = Redis.fromEnv(c.env);
+			const serverTime = Date.now();
+			const serverTimeISO = new Date().toISOString();
 
-			const stats = await Effect.runPromise(
-				Effect.gen(function* () {
-					const admission = yield* getAdmissionStats();
-					return admission;
-				}).pipe(Effect.provide(redisLayer)),
-			);
+			try {
+				const redisPing = await redis.ping();
+				const testKey = `status:check:${serverTime}`;
+				await redis.set(testKey, serverTimeISO, { ex: 60 });
+				const retrievedValue = await redis.get<string>(testKey);
+				await redis.del(testKey);
 
-			const pendingCount = await redis.zcard(RedisKeys.jobsPending);
-			const activeJobs = await redis.hgetall<Record<string, string>>(RedisKeys.jobsActive);
-
-			return c.json({
-				machines: stats,
-				pendingJobs: pendingCount,
-				activeJobs: activeJobs ? Object.keys(activeJobs).length : 0,
-				activeJobIds: activeJobs ? Object.keys(activeJobs) : [],
-			});
-		} catch (error) {
-			console.error("[Route] Redis error in /stats:", error);
-			return c.json({ error: "Redis connection failed" }, 500);
-		}
-	}).get("/status", async (c) => {
-		const redis = Redis.fromEnv(c.env);
-		const serverTime = Date.now();
-		const serverTimeISO = new Date().toISOString();
-
-		try {
-			const redisPing = await redis.ping();
-			const testKey = `status:check:${serverTime}`;
-			await redis.set(testKey, serverTimeISO, { ex: 60 });
-			const retrievedValue = await redis.get<string>(testKey);
-			await redis.del(testKey);
-
-			return c.json({
-				status: "ok",
-				serverTime: {
-					timestamp: serverTime,
-					iso: serverTimeISO,
-					utc: new Date().toUTCString(),
-				},
-				redis: {
-					connected: true,
-					ping: redisPing,
-					testRead: retrievedValue === serverTimeISO,
-				},
-			});
-		} catch (error) {
-			return c.json(
-				{
-					status: "error",
+				return c.json({
+					status: "ok",
 					serverTime: {
 						timestamp: serverTime,
 						iso: serverTimeISO,
 						utc: new Date().toUTCString(),
 					},
 					redis: {
-						connected: false,
-						error: error instanceof Error ? error.message : String(error),
+						connected: true,
+						ping: redisPing,
+						testRead: retrievedValue === serverTimeISO,
 					},
-				},
-				500,
-			);
-		}
-	});
+				});
+			} catch (error) {
+				return c.json(
+					{
+						status: "error",
+						serverTime: {
+							timestamp: serverTime,
+							iso: serverTimeISO,
+							utc: new Date().toUTCString(),
+						},
+						redis: {
+							connected: false,
+							error: error instanceof Error ? error.message : String(error),
+						},
+					},
+					500,
+				);
+			}
+		});
 
 	return app;
 };
@@ -85,4 +87,3 @@ const buildStatsRoutes = () => {
 export const createStatsRoutes = (): ReturnType<typeof buildStatsRoutes> => {
 	return buildStatsRoutes();
 };
-

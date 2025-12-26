@@ -9,28 +9,28 @@ describe("Worker", () => {
 
 	describe("Fetch Handler", () => {
 		it("responds with ok status on root path", async () => {
-				const cfTest = await getCloudflareTest();
-				if (!cfTest) {
-					// Skip test if cloudflare:test is not available (e.g., running with bun test)
-					return;
-				}
-				const { createExecutionContext, env, waitOnExecutionContext } = cfTest;
-				const { default: worker } = await import("../src/index");
-				const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
+			const cfTest = await getCloudflareTest();
+			if (!cfTest) {
+				// Skip test if cloudflare:test is not available (e.g., running with bun test)
+				return;
+			}
+			const { createExecutionContext, env, waitOnExecutionContext } = cfTest;
+			const { default: worker } = await import("../src/index");
+			const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
-				const request = new IncomingRequest("http://example.com/");
-				const ctx = createExecutionContext();
-				// Type assertion needed because ProvidedEnv may not have all Env properties in test
-				const response = await worker.fetch(request, env as unknown as Parameters<typeof worker.fetch>[1], ctx);
-				await waitOnExecutionContext(ctx);
+			const request = new IncomingRequest("http://example.com/");
+			const ctx = createExecutionContext();
+			// Type assertion needed because ProvidedEnv may not have all Env properties in test
+			const response = await worker.fetch(request, env as unknown as Parameters<typeof worker.fetch>[1], ctx);
+			await waitOnExecutionContext(ctx);
 
-				expect(response.status).toBe(200);
-				const data = (await response.json()) as { status: string; service: string };
-				expect(data).toEqual({
-					status: "ok",
-					service: "tcoder",
-				});
-			}, 10000);
+			expect(response.status).toBe(200);
+			const data = (await response.json()) as { status: string; service: string };
+			expect(data).toEqual({
+				status: "ok",
+				service: "tcoder",
+			});
+		}, 10000);
 
 		it("responds with ok status (integration style)", async () => {
 			const cfTest = await getCloudflareTest();

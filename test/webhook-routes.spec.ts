@@ -122,7 +122,7 @@ describe("Webhook Routes", () => {
 				// Redis unavailable - verify it's an error response
 				expect(response.status).toBe(500);
 			}
-			}, 10000);
+		}, 10000);
 
 		it("validates request schema - missing required fields", async () => {
 			const cfTest = await getCloudflareTest();
@@ -196,6 +196,6 @@ describe("Webhook Routes", () => {
 				// Redis unavailable - verify it's an error response
 				expect(response.status).toBe(500);
 			}
-			}, 10000);
+		}, 10000);
 	});
 });

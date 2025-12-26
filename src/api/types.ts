@@ -16,4 +16,3 @@ export type Env = RedisEnv & {
 	FLY_REGION: string;
 	WEBHOOK_BASE_URL: string;
 };
-

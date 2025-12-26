@@ -12,12 +12,7 @@
 import { Context, Effect, Layer } from "effect";
 import { flyClient } from "./fly-client";
 import type { CreateMachineRequest, Machine } from "./fly-machine-apis";
-import {
-	LoggerService,
-	logMachineCreated,
-	logMachineStatus,
-	makeLoggerLayer,
-} from "../packages/logger";
+import { LoggerService, logMachineCreated, logMachineStatus, makeLoggerLayer } from "../packages/logger";
 
 // Configuration
 interface FlyConfig {
@@ -126,10 +121,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 						? {
 								_tag: "HttpError",
 								status: e.response.status as number,
-								body:
-									typeof e.response.data === "string"
-										? e.response.data
-										: JSON.stringify(e.response.data),
+								body: typeof e.response.data === "string" ? e.response.data : JSON.stringify(e.response.data),
 							}
 						: {
 								_tag: "HttpError",
@@ -198,10 +190,7 @@ const getMachineStatus = (machineId: string, apiToken: string) =>
 						? {
 								_tag: "HttpError",
 								status: e.response.status as number,
-								body:
-									typeof e.response.data === "string"
-										? e.response.data
-										: JSON.stringify(e.response.data),
+								body: typeof e.response.data === "string" ? e.response.data : JSON.stringify(e.response.data),
 							}
 						: {
 								_tag: "HttpError",

@@ -17,60 +17,60 @@ async function getCloudflareTest() {
 describe("API Routes", () => {
 	describe("GET /status", () => {
 		it("returns status with server time and Redis info", async () => {
-				const cfTest = await getCloudflareTest();
-				if (!cfTest) return;
-				const { SELF } = cfTest;
+			const cfTest = await getCloudflareTest();
+			if (!cfTest) return;
+			const { SELF } = cfTest;
 
-				const response = await SELF.fetch("https://example.com/api/status");
+			const response = await SELF.fetch("https://example.com/api/status");
 
-				// Status endpoint may return 500 if Redis is not available in test env
-				// This is acceptable - we just check the structure
-				const data = (await response.json()) as {
-					status: string;
-					serverTime: { timestamp: number; iso: string; utc: string };
-					redis: { connected?: boolean; ping?: string; testRead?: boolean };
-				};
+			// Status endpoint may return 500 if Redis is not available in test env
+			// This is acceptable - we just check the structure
+			const data = (await response.json()) as {
+				status: string;
+				serverTime: { timestamp: number; iso: string; utc: string };
+				redis: { connected?: boolean; ping?: string; testRead?: boolean };
+			};
 
-				expect(data).toHaveProperty("status");
-				expect(data).toHaveProperty("serverTime");
-				expect(data).toHaveProperty("redis");
-				expect(data.serverTime).toHaveProperty("timestamp");
-				expect(data.serverTime).toHaveProperty("iso");
-				expect(data.serverTime).toHaveProperty("utc");
+			expect(data).toHaveProperty("status");
+			expect(data).toHaveProperty("serverTime");
+			expect(data).toHaveProperty("redis");
+			expect(data.serverTime).toHaveProperty("timestamp");
+			expect(data.serverTime).toHaveProperty("iso");
+			expect(data.serverTime).toHaveProperty("utc");
 
-				// If Redis is available, status should be ok
-				if (response.status === 200) {
-					expect(data.redis.connected).toBe(true);
-					expect(data.redis.ping).toBe("PONG");
-					expect(data.redis.testRead).toBe(true);
-				}
-			}, 30000); // 30 second timeout for Redis connection
+			// If Redis is available, status should be ok
+			if (response.status === 200) {
+				expect(data.redis.connected).toBe(true);
+				expect(data.redis.ping).toBe("PONG");
+				expect(data.redis.testRead).toBe(true);
+			}
+		}, 30000); // 30 second timeout for Redis connection
 
 		it("handles Redis connection errors gracefully", async () => {
-				const cfTest = await getCloudflareTest();
-				if (!cfTest) return;
-				const { SELF } = cfTest;
+			const cfTest = await getCloudflareTest();
+			if (!cfTest) return;
+			const { SELF } = cfTest;
 
-				const response = await SELF.fetch("https://example.com/api/status");
+			const response = await SELF.fetch("https://example.com/api/status");
 
-				// Should always return a response, even if Redis is unavailable
-				expect(response.status).toBeGreaterThanOrEqual(200);
-				expect(response.status).toBeLessThan(600);
+			// Should always return a response, even if Redis is unavailable
+			expect(response.status).toBeGreaterThanOrEqual(200);
+			expect(response.status).toBeLessThan(600);
 
-				const data = (await response.json()) as {
-					status: string;
-					serverTime: { timestamp: number; iso: string; utc: string };
-					redis: { connected?: boolean };
-				};
-				expect(data).toHaveProperty("status");
-				expect(data).toHaveProperty("serverTime");
+			const data = (await response.json()) as {
+				status: string;
+				serverTime: { timestamp: number; iso: string; utc: string };
+				redis: { connected?: boolean };
+			};
+			expect(data).toHaveProperty("status");
+			expect(data).toHaveProperty("serverTime");
 
-				// If Redis is unavailable, status may be "error"
-				if (data.status === "error") {
-					expect(data.redis).toHaveProperty("connected");
-					expect(data.redis.connected).toBe(false);
-				}
-			}, 10000);
+			// If Redis is unavailable, status may be "error"
+			if (data.status === "error") {
+				expect(data.redis).toHaveProperty("connected");
+				expect(data.redis.connected).toBe(false);
+			}
+		}, 10000);
 	});
 
 	describe("GET /stats", () => {

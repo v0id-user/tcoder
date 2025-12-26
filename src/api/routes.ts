@@ -10,10 +10,7 @@ const buildRoutes = () => {
 	const jobRoutes = createJobRoutes();
 	const statsRoutes = createStatsRoutes();
 
-	return new Hono<{ Bindings: Env }>()
-		.route("/", uploadRoutes)
-		.route("/", jobRoutes)
-		.route("/", statsRoutes);
+	return new Hono<{ Bindings: Env }>().route("/", uploadRoutes).route("/", jobRoutes).route("/", statsRoutes);
 };
 
 export const createRoutes = (): ReturnType<typeof buildRoutes> => {
@@ -21,4 +18,3 @@ export const createRoutes = (): ReturnType<typeof buildRoutes> => {
 };
 
 export { createWebhookRoutes };
-

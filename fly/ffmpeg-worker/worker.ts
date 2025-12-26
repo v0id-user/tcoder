@@ -313,9 +313,7 @@ const loggerLayer = makeLoggerLayer({
 	machineId,
 });
 
-const program = workerLoop.pipe(
-	Effect.provide(Layer.mergeAll(loggerLayer, makeRedisLayer, makeR2ClientLayer, makeWebhookClientLayer)),
-);
+const program = workerLoop.pipe(Effect.provide(Layer.mergeAll(loggerLayer, makeRedisLayer, makeR2ClientLayer, makeWebhookClientLayer)));
 
 Effect.runPromiseExit(program).then((exit) => {
 	if (Exit.isSuccess(exit)) {

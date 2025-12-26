@@ -19,10 +19,6 @@ export type Client = ReturnType<typeof hc<AppType>>;
  * @param options - Optional client configuration (headers, credentials, etc.)
  * @returns Typed RPC client
  */
-export const createClient = (
-	baseUrl: string,
-	options?: Parameters<typeof hc<AppType>>[1],
-): Client => {
+export const createClient = (baseUrl: string, options?: Parameters<typeof hc<AppType>>[1]): Client => {
 	return hc<AppType>(baseUrl, options);
 };
-
