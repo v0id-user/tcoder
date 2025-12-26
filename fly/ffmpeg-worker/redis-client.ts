@@ -10,6 +10,7 @@
 
 import { Redis } from "@upstash/redis";
 import { Context, Effect, Layer } from "effect";
+import { LoggerService } from "../../packages/logger";
 
 // =============================================================================
 // Error Types
@@ -29,16 +30,26 @@ export class RedisService extends Context.Tag("RedisService")<RedisService, { re
 // Helper to wrap Redis operations
 // =============================================================================
 
-export const redisEffect = <T>(operation: (redis: Redis) => Promise<T>): Effect.Effect<T, RedisError, RedisService> =>
+export const redisEffect = <T>(
+	operation: (redis: Redis) => Promise<T>,
+	operationName?: string,
+): Effect.Effect<T, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
-		return yield* Effect.tryPromise({
+		const startTime = Date.now();
+		const opName = operationName || "redis-operation";
+		yield* logger.debug("[redisEffect] Entering", { operation: opName });
+		const result = yield* Effect.tryPromise({
 			try: () => operation(client),
 			catch: (e) => ({
 				_tag: "CommandError" as const,
 				reason: e instanceof Error ? e.message : String(e),
 			}),
 		});
+		const duration = Date.now() - startTime;
+		yield* logger.debug("[redisEffect] Exiting", { operation: opName, duration: `${duration}ms` });
+		return result;
 	});
 
 // =============================================================================

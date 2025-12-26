@@ -96,13 +96,19 @@ const downloadInput = (inputUrl: string, localInputPath: string) =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
 		const r2Client = yield* R2ClientService;
+		const startTime = Date.now();
+		yield* logger.debug("[downloadInput] Entering", { inputUrl, localInputPath });
 		yield* logger.debug("Downloading input", { inputUrl, localInputPath });
 		yield* r2Client.download(inputUrl, localInputPath);
+		const duration = Date.now() - startTime;
+		yield* logger.debug("[downloadInput] Exiting", { inputUrl, localInputPath, duration: `${duration}ms` });
 	});
 
 const runFFmpeg = (args: string[]) =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
+		const startTime = Date.now();
+		yield* logger.debug("[runFFmpeg] Entering", { args: args.join(" ") });
 		yield* logger.info("Starting FFmpeg transcoding", { args: args.join(" ") });
 		yield* Effect.tryPromise({
 			try: async () => {
@@ -110,13 +116,21 @@ const runFFmpeg = (args: string[]) =>
 			},
 			catch: (e) => new Error(`FFmpeg failed: ${e instanceof Error ? e.message : String(e)}`),
 		});
+		const duration = Date.now() - startTime;
 		yield* logger.debug("FFmpeg transcoding completed");
+		yield* logger.debug("[runFFmpeg] Exiting", { duration: `${duration}ms` });
 	});
 
 const uploadOutputs = (config: JobConfig, localOutputPaths: string[]) =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
 		const r2Client = yield* R2ClientService;
+		const startTime = Date.now();
+		yield* logger.debug("[uploadOutputs] Entering", {
+			jobId: config.jobId,
+			outputCount: localOutputPaths.length,
+			outputPaths: localOutputPaths,
+		});
 		const outputs: OutputFile[] = [];
 
 		for (let i = 0; i < localOutputPaths.length; i++) {
@@ -136,12 +150,26 @@ const uploadOutputs = (config: JobConfig, localOutputPaths: string[]) =>
 			outputs.push({ quality, localPath, r2Key, r2Url });
 		}
 
+		const duration = Date.now() - startTime;
+		yield* logger.debug("[uploadOutputs] Exiting", {
+			jobId: config.jobId,
+			outputCount: outputs.length,
+			duration: `${duration}ms`,
+		});
 		return outputs;
 	});
 
 const notifyWebhook = (config: JobConfig, outputs: OutputFile[], duration: number, error?: string) =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const webhookClient = yield* WebhookClientService;
+		const startTime = Date.now();
+		yield* logger.debug("[notifyWebhook] Entering", {
+			jobId: config.jobId,
+			webhookUrl: config.webhookUrl,
+			status: error ? "failed" : "completed",
+			outputCount: outputs.length,
+		});
 		const payload: WebhookPayload = {
 			jobId: config.jobId,
 			status: error ? "failed" : "completed",
@@ -151,16 +179,26 @@ const notifyWebhook = (config: JobConfig, outputs: OutputFile[], duration: numbe
 			duration: Math.round(duration),
 		};
 		yield* webhookClient.notify(payload);
+		const notifyDuration = Date.now() - startTime;
+		yield* logger.debug("[notifyWebhook] Exiting", {
+			jobId: config.jobId,
+			duration: `${notifyDuration}ms`,
+		});
 	});
 
 const cleanupFiles = (paths: string[]) =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		const startTime = Date.now();
+		yield* logger.debug("[cleanupFiles] Entering", { fileCount: paths.length, paths });
 		for (const path of paths) {
 			yield* Effect.tryPromise({
 				try: () => unlink(path),
 				catch: () => null,
 			});
 		}
+		const duration = Date.now() - startTime;
+		yield* logger.debug("[cleanupFiles] Exiting", { fileCount: paths.length, duration: `${duration}ms` });
 	});
 
 /**
@@ -170,11 +208,13 @@ const processJob = (jobId: string) =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
 		const startTime = Date.now();
+		yield* logger.debug("[processJob] Entering", { jobId });
 
 		// Get job data from Redis
 		const jobData = yield* getJobData(jobId);
 		if (!jobData) {
 			yield* logger.error("Job not found in Redis", undefined, { jobId });
+			yield* logger.debug("[processJob] Exiting early - job not found", { jobId });
 			return;
 		}
 
@@ -239,6 +279,12 @@ const processJob = (jobId: string) =>
 		// Cleanup files
 		yield* cleanupFiles([localInputPath, ...localOutputPaths]);
 
+		const totalDuration = Date.now() - startTime;
+		yield* logger.debug("[processJob] Exiting", {
+			jobId,
+			totalDuration: `${totalDuration}ms`,
+			success: result !== undefined,
+		});
 		return result;
 	});
 
@@ -249,7 +295,9 @@ const processJob = (jobId: string) =>
 const workerLoop = Effect.gen(function* () {
 	const logger = yield* LoggerService;
 	const machineId = process.env.FLY_MACHINE_ID || `local-${Date.now()}`;
+	const loopStartTime = Date.now();
 
+	yield* logger.debug("[workerLoop] Entering", { machineId });
 	yield* logWorkerStarted(logger, machineId);
 
 	// Initialize worker in pool
@@ -296,6 +344,12 @@ const workerLoop = Effect.gen(function* () {
 		Effect.ensuring(
 			Effect.gen(function* () {
 				// Cleanup on exit
+				const loopDuration = Date.now() - loopStartTime;
+				yield* logger.debug("[workerLoop] Exiting", {
+					machineId,
+					jobsProcessed,
+					loopDuration: `${loopDuration}ms`,
+				});
 				yield* cleanupWorker(machineId).pipe(Effect.catchAll(() => Effect.void));
 				yield* logWorkerStopped(logger, machineId, jobsProcessed);
 			}),
