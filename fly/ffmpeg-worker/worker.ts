@@ -20,6 +20,7 @@ import { $ } from "bun";
 import { Effect, Exit, Layer } from "effect";
 import {
 	LoggerService,
+	type LogLevel,
 	logJobCompleted,
 	logJobFailed,
 	logJobStarted,
@@ -362,9 +363,11 @@ const workerLoop = Effect.gen(function* () {
 // =============================================================================
 
 const machineId = process.env.FLY_MACHINE_ID || `local-${Date.now()}`;
+const logLevel = (process.env.LOG_LEVEL || (machineId.startsWith("local-") ? "debug" : "info")) as LogLevel;
 const loggerLayer = makeLoggerLayer({
 	component: "ffmpeg-worker",
 	machineId,
+	logLevel,
 });
 
 const program = workerLoop.pipe(Effect.provide(Layer.mergeAll(loggerLayer, makeRedisLayer, makeR2ClientLayer, makeWebhookClientLayer)));
