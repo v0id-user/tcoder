@@ -1,0 +1,17 @@
+node_modules
+.git
+.env
+.env.*
+*.log
+*.md
+.DS_Store
+test/
+scripts/
+design/
+.vscode/
+.cursor/
+dist/
+.wrangler/
+*.test.ts
+*.spec.ts
+
