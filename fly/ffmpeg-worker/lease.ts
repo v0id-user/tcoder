@@ -322,13 +322,26 @@ export const completeJob = (
 		const { client } = yield* RedisService;
 		const startTime = Date.now();
 		yield* logger.debug("[completeJob] Entering", { jobId, duration, outputCount: outputs?.length ?? 0 });
-		const pipe = client.pipeline();
-		pipe.hset(RedisKeys.jobStatus(jobId), {
+
+		// Build updates object with explicit string values to avoid serialization issues
+		const updates: Record<string, string> = {
 			status: "completed",
 			completedAt: String(Date.now()),
 			duration: String(duration),
-			...(outputs && outputs.length > 0 && { outputs: JSON.stringify(outputs) }),
-		});
+		};
+
+		if (outputs && outputs.length > 0) {
+			const serialized = JSON.stringify(outputs);
+			updates.outputs = serialized;
+			// Debug log to verify serialization
+			yield* logger.debug("[completeJob] Serialized outputs", {
+				outputCount: outputs.length,
+				serialized: serialized.substring(0, 100),
+			});
+		}
+
+		const pipe = client.pipeline();
+		pipe.hset(RedisKeys.jobStatus(jobId), updates);
 		pipe.hdel(RedisKeys.jobsActive, jobId);
 
 		yield* Effect.tryPromise({

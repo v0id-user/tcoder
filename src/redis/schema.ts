@@ -178,6 +178,21 @@ export const deserializeJobData = (data: Record<string, string | null>): JobData
 		return null;
 	}
 
+	// Helper to safely parse JSON fields - handles both string and pre-parsed object
+	// (Upstash Redis SDK auto-parses JSON values in some contexts)
+	const safeParseJson = <T>(value: string | null | T): T | undefined => {
+		if (value === null || value === undefined) return undefined;
+		if (typeof value === "string") {
+			try {
+				return JSON.parse(value) as T;
+			} catch {
+				return undefined;
+			}
+		}
+		// Value is already parsed (Upstash SDK auto-parsing)
+		return value as T;
+	};
+
 	return {
 		jobId: data.jobId,
 		status: (data.status as JobStatus) || "uploading",
@@ -188,7 +203,7 @@ export const deserializeJobData = (data: Record<string, string | null>): JobData
 		preset: data.preset || "default",
 		webhookUrl: data.webhookUrl || "",
 		outputQualities: data.outputQualities ? data.outputQualities.split(",") : undefined,
-		outputs: data.outputs ? JSON.parse(data.outputs) : undefined,
+		outputs: safeParseJson<JobOutput[]>(data.outputs as string | JobOutput[] | null),
 		filename: data.filename || undefined,
 		contentType: data.contentType || undefined,
 		timestamps: {
@@ -200,7 +215,7 @@ export const deserializeJobData = (data: Record<string, string | null>): JobData
 		},
 		error: data.error || undefined,
 		retries: Number(data.retries) || 0,
-		r2Config: data.r2Config ? JSON.parse(data.r2Config) : undefined,
+		r2Config: safeParseJson<JobData["r2Config"]>(data.r2Config as string | JobData["r2Config"] | null),
 	};
 };
 
