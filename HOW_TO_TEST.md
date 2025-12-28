@@ -2,6 +2,97 @@
 
 A CLI-focused guide for testing the transcoding API locally.
 
+---
+
+## Python Script (Recommended - Fully Automatic)
+
+The easiest way to test TCoder locally is using the provided Python script, which automates the entire workflow.
+
+### Prerequisites
+
+1. **Python 3.7+** (uses only standard library, no dependencies)
+2. **Services running** (see Prerequisites section below)
+
+### Usage
+
+The script automatically handles:
+1. Requesting presigned upload URL
+2. Uploading video file to R2
+3. Manually triggering R2 event processing (dev mode only)
+4. Polling for job completion
+
+**Basic usage:**
+```bash
+python scripts/client_flow.py video.mp4
+```
+
+**With options:**
+```bash
+python scripts/client_flow.py video.mp4 \
+  --preset web-optimized \
+  --qualities 720p 1080p \
+  --base-url http://localhost:8787
+```
+
+**Full options:**
+```bash
+python scripts/client_flow.py video.mp4 \
+  --base-url http://localhost:8787 \
+  --preset web-optimized \
+  --qualities 720p 1080p \
+  --content-type video/mp4 \
+  --poll-interval 5 \
+  --max-wait 3600
+```
+
+### Options
+
+- `video_file` (required): Path to video file to transcode
+- `--base-url`: API server URL (default: `http://localhost:8787`)
+- `--preset`: Transcoding preset - `default`, `web-optimized`, `hls`, or `hls-adaptive` (default: `default`)
+- `--qualities`: Output qualities, e.g., `720p 1080p` (optional)
+- `--content-type`: Content type (default: `video/mp4`)
+- `--poll-interval`: Poll interval in seconds (default: `5`)
+- `--max-wait`: Maximum wait time in seconds (default: no limit)
+
+### Example Output
+
+```
+📤 Requesting upload URL for video.mp4...
+✅ Upload URL received. Job ID: 550e8400-e29b-41d4-a716-446655440000
+📤 Uploading video.mp4 to R2...
+✅ Upload complete!
+🔔 Triggering R2 event processing for job 550e8400-e29b-41d4-a716-446655440000...
+✅ Job queued for processing. Status: pending
+🔍 Polling job 550e8400-e29b-41d4-a716-446655440000...
+   Poll interval: 5s
+   [0s] Status: pending
+   [5s] Status: running
+   [45s] Status: completed
+✅ Job completed successfully!
+
+📦 Outputs:
+   • 720p: https://xxx.r2.cloudflarestorage.com/outputs/550e8400.../720p.mp4
+   • 1080p: https://xxx.r2.cloudflarestorage.com/outputs/550e8400.../1080p.mp4
+
+⏱️  Timestamps:
+   Created: 2023-12-25 12:00:00
+   Uploaded: 2023-12-25 12:00:01
+   Queued: 2023-12-25 12:00:01
+   Started: 2023-12-25 12:00:05
+   Completed: 2023-12-25 12:00:45
+   Duration: 40.0s
+```
+
+### Notes
+
+- The script uses only Python standard library (no `pip install` required)
+- The R2 event trigger endpoint (`/api/jobs/:jobId/trigger-r2-event`) is **dev mode only** and will return 404 in production
+- The script automatically handles the complete workflow from upload to completion
+- Press `Ctrl+C` to interrupt polling at any time
+
+---
+
 ## Prerequisites
 
 1. **Setup environment:**

@@ -91,23 +91,23 @@ class TcoderClient:
         if output_qualities:
             payload["outputQualities"] = output_qualities
 
-        print(f"📤 Requesting upload URL for {filename}...")
+        print(f"Requesting upload URL for {filename}...")
         data: Dict[str, Any] = self._request("POST", url, payload)
-        print(f"✅ Upload URL received. Job ID: {data['jobId']}")
+        print(f"Upload URL received. Job ID: {data['jobId']}")
         return data
 
     def upload_file(self, upload_url: str, file_path: Path, content_type: str) -> None:
         """Upload file to presigned URL"""
-        print(f"📤 Uploading {file_path.name} to R2...")
+        print(f"Uploading {file_path.name} to R2...")
         self._put_file(upload_url, file_path, content_type)
-        print(f"✅ Upload complete!")
+        print(f"Upload complete!")
 
     def trigger_r2_event(self, job_id: str) -> Dict[str, Any]:
         """Manually trigger R2 event processing (simulates webhook notification)"""
         url: str = f"{self.api_base}/jobs/{job_id}/trigger-r2-event"
-        print(f"🔔 Triggering R2 event processing for job {job_id}...")
+        print(f"Triggering R2 event processing for job {job_id}...")
         data: Dict[str, Any] = self._request("POST", url)
-        print(f"✅ Job queued for processing. Status: {data.get('status', 'unknown')}")
+        print(f"Job queued for processing. Status: {data.get('status', 'unknown')}")
         if data.get("machineId"):
             print(f"   Machine ID: {data['machineId']}")
         return data
@@ -127,7 +127,7 @@ class TcoderClient:
         start_time: float = time.time()
         last_status: Optional[str] = None
 
-        print(f"🔍 Polling job {job_id}...")
+        print(f"Polling job {job_id}...")
         print(f"   Poll interval: {poll_interval}s")
         if max_wait:
             print(f"   Max wait time: {max_wait}s")
@@ -145,34 +145,34 @@ class TcoderClient:
 
                 # Check if job is complete
                 if current_status == "completed":
-                    print(f"✅ Job completed successfully!")
+                    print(f"Job completed successfully!")
                     self._print_job_results(status)
                     return status
 
                 if current_status == "failed":
                     error: str = status.get("error", "Unknown error")
-                    print(f"❌ Job failed: {error}")
+                    print(f"Job failed: {error}")
                     return status
 
                 # Check timeout
                 if max_wait and (time.time() - start_time) > max_wait:
-                    print(f"⏱️  Timeout after {max_wait}s")
+                    print(f"Timeout after {max_wait}s")
                     return status
 
                 time.sleep(poll_interval)
 
             except KeyboardInterrupt:
-                print("\n⚠️  Polling interrupted by user")
+                print("\nPolling interrupted by user")
                 sys.exit(1)
             except Exception as e:
-                print(f"❌ Error polling job: {e}")
+                print(f"Error polling job: {e}")
                 time.sleep(poll_interval)
 
     def _print_job_results(self, status: Dict[str, Any]) -> None:
         """Print job results in a readable format"""
         outputs: Optional[List[Dict[str, Any]]] = status.get("outputs")
         if outputs:
-            print("\n📦 Outputs:")
+            print("\nOutputs:")
             for output in outputs:
                 quality: str = output.get("quality", "unknown")
                 url: str = output.get("url", "N/A")
@@ -180,7 +180,7 @@ class TcoderClient:
 
         timestamps: Dict[str, Any] = status.get("timestamps", {})
         if timestamps:
-            print("\n⏱️  Timestamps:")
+            print("\nTimestamps:")
             if "createdAt" in timestamps:
                 print(f"   Created: {self._format_timestamp(timestamps['createdAt'])}")
             if "uploadedAt" in timestamps:
@@ -257,7 +257,7 @@ def main() -> None:
     args: argparse.Namespace = parser.parse_args()
 
     if not args.video_file.exists():
-        print(f"❌ File not found: {args.video_file}")
+        print(f"File not found: {args.video_file}")
         sys.exit(1)
 
     client: TcoderClient = TcoderClient(base_url=args.base_url)
@@ -283,10 +283,10 @@ def main() -> None:
         client.poll_job(job_id, poll_interval=args.poll_interval, max_wait=args.max_wait)
 
     except KeyboardInterrupt:
-        print("\n⚠️  Interrupted by user")
+        print("\nInterrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
         import traceback
 
         traceback.print_exc()
