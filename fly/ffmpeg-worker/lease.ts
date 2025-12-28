@@ -7,6 +7,7 @@
 
 import { Effect } from "effect";
 import { LoggerService, logLeaseCleanup, logLeaseInitialized, logLeaseStateUpdate } from "../../packages/logger";
+import { RWOS_CONFIG } from "../../src/redis/schema";
 import { type RedisError, RedisService, redisEffect } from "./redis-client";
 
 // =============================================================================
@@ -17,6 +18,10 @@ export const LEASE_CONFIG = {
 	/** Poll interval when waiting for jobs */
 	POLL_INTERVAL_MS: 5_000,
 } as const;
+
+// Import failure tracking constants from schema
+const MAX_JOB_RETRIES = RWOS_CONFIG.MAX_JOB_RETRIES;
+const MAX_WORKER_FAILURES = RWOS_CONFIG.MAX_WORKER_FAILURES;
 
 // =============================================================================
 // Redis Keys (duplicated here to avoid cross-package imports)
@@ -55,7 +60,7 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 		yield* logger.debug("[initializeWorker] Entering", { machineId });
 		const now = Date.now();
 
-		// Get existing pool entry to preserve createdAt
+		// Get existing pool entry to preserve createdAt and failureCount
 		const existingEntry = yield* Effect.tryPromise({
 			try: async () => {
 				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
@@ -66,6 +71,7 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 							state: parsed.state || "running",
 							lastActiveAt: Number(parsed.lastActiveAt) || now,
 							createdAt: Number(parsed.createdAt) || now,
+							failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 						};
 					} catch {
 						return null;
@@ -81,8 +87,9 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 
 		const createdAt = existingEntry?.createdAt || now;
 		const startedAt = existingEntry?.createdAt || now;
+		const failureCount = existingEntry?.failureCount;
 
-		// Update pool entry to running
+		// Update pool entry to running (preserve failureCount if it exists)
 		yield* Effect.tryPromise({
 			try: async () => {
 				await client.hset(RedisKeys.machinesPool, {
@@ -90,6 +97,7 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 						state: "running",
 						lastActiveAt: now,
 						createdAt,
+						...(failureCount !== undefined && { failureCount }),
 					}),
 				});
 			},
@@ -107,11 +115,11 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 	});
 
 /**
- * Update machine state in pool (running when processing, idle when waiting).
+ * Update machine state in pool (running when processing, idle when waiting, failed when worker fails too many jobs).
  */
 export const updateMachineState = (
 	machineId: string,
-	state: "running" | "idle",
+	state: "running" | "idle" | "failed",
 ): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
@@ -120,7 +128,7 @@ export const updateMachineState = (
 		yield* logger.debug("[updateMachineState] Entering", { machineId, state });
 		const now = Date.now();
 
-		// Get existing entry to preserve createdAt
+		// Get existing entry to preserve createdAt and failureCount
 		const existingEntry = yield* Effect.tryPromise({
 			try: async () => {
 				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
@@ -131,6 +139,7 @@ export const updateMachineState = (
 							state: parsed.state || "running",
 							lastActiveAt: Number(parsed.lastActiveAt) || now,
 							createdAt: Number(parsed.createdAt) || now,
+							failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 						};
 					} catch {
 						return null;
@@ -145,6 +154,7 @@ export const updateMachineState = (
 		});
 
 		const createdAt = existingEntry?.createdAt || now;
+		const failureCount = existingEntry?.failureCount;
 
 		yield* redisEffect(
 			(client) =>
@@ -153,6 +163,7 @@ export const updateMachineState = (
 						state,
 						lastActiveAt: now,
 						createdAt,
+						...(failureCount !== undefined && { failureCount }),
 					}),
 				}),
 			"updateMachineState",
@@ -175,7 +186,7 @@ export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError
 		yield* logger.debug("[cleanupWorker] Entering", { machineId });
 		const now = Date.now();
 
-		// Get existing entry to preserve createdAt
+		// Get existing entry to preserve createdAt and failureCount
 		const existingEntry = yield* Effect.tryPromise({
 			try: async () => {
 				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
@@ -186,6 +197,7 @@ export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError
 							state: parsed.state || "stopped",
 							lastActiveAt: Number(parsed.lastActiveAt) || now,
 							createdAt: Number(parsed.createdAt) || now,
+							failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 						};
 					} catch {
 						return null;
@@ -200,6 +212,7 @@ export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError
 		});
 
 		const createdAt = existingEntry?.createdAt || now;
+		const failureCount = existingEntry?.failureCount;
 
 		// Mark as stopped (cron will handle actual Fly API stop)
 		yield* redisEffect(
@@ -209,6 +222,7 @@ export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError
 						state: "stopped",
 						lastActiveAt: now,
 						createdAt,
+						...(failureCount !== undefined && { failureCount }),
 					}),
 				}),
 			"cleanupWorker",
@@ -330,14 +344,209 @@ export const completeJob = (
 	});
 
 /**
- * Mark job as failed.
+ * Requeue a job (for retry after failure).
  */
-export const failJob = (jobId: string, error: string): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
+const requeueJob = (jobId: string): Effect.Effect<boolean, RedisError, RedisService | LoggerService> =>
+	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		const { client } = yield* RedisService;
+
+		const jobData = yield* Effect.tryPromise({
+			try: () => client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId)),
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+
+		if (!jobData || Object.keys(jobData).length === 0) {
+			return false;
+		}
+
+		const retries = Number(jobData.retries || 0);
+		if (retries >= MAX_JOB_RETRIES) {
+			return false;
+		}
+
+		yield* Effect.tryPromise({
+			try: async () => {
+				const pipe = client.pipeline();
+				pipe.zadd(RedisKeys.jobsPending, { score: Date.now(), member: jobId });
+				pipe.hset(RedisKeys.jobStatus(jobId), {
+					status: "pending",
+					retries: String(retries + 1),
+					machineId: "",
+				});
+				pipe.hdel(RedisKeys.jobsActive, jobId);
+				await pipe.exec();
+			},
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+
+		return true;
+	});
+
+/**
+ * Get current worker failure count from Redis.
+ */
+const getWorkerFailureCount = (machineId: string): Effect.Effect<number, RedisError, RedisService | LoggerService> =>
+	Effect.gen(function* () {
+		const { client } = yield* RedisService;
+		const data = yield* Effect.tryPromise({
+			try: async () => {
+				const entryData = await client.hget<string>(RedisKeys.machinesPool, machineId);
+				if (!entryData) {
+					return 0;
+				}
+				try {
+					const parsed = JSON.parse(entryData);
+					return Number(parsed.failureCount || 0);
+				} catch {
+					return 0;
+				}
+			},
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+		return data;
+	});
+
+/**
+ * Increment worker failure count and return new count.
+ */
+const incrementWorkerFailureCount = (machineId: string): Effect.Effect<number, RedisError, RedisService | LoggerService> =>
+	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		const { client } = yield* RedisService;
+		const now = Date.now();
+
+		// Get existing entry to preserve createdAt and other fields
+		const existingEntry = yield* Effect.tryPromise({
+			try: async () => {
+				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
+				if (data) {
+					try {
+						const parsed = JSON.parse(data);
+						return {
+							state: parsed.state || "running",
+							lastActiveAt: Number(parsed.lastActiveAt) || now,
+							createdAt: Number(parsed.createdAt) || now,
+							failureCount: Number(parsed.failureCount || 0),
+						};
+					} catch {
+						return null;
+					}
+				}
+				return null;
+			},
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+
+		const createdAt = existingEntry?.createdAt || now;
+		const currentFailureCount = existingEntry?.failureCount ?? 0;
+		const newFailureCount = currentFailureCount + 1;
+
+		// Update pool entry with incremented failure count
+		yield* Effect.tryPromise({
+			try: async () => {
+				await client.hset(RedisKeys.machinesPool, {
+					[machineId]: JSON.stringify({
+						state: existingEntry?.state || "running",
+						lastActiveAt: now,
+						createdAt,
+						failureCount: newFailureCount,
+					}),
+				});
+			},
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+
+		yield* logger.debug("[incrementWorkerFailureCount] Worker failure count incremented", {
+			machineId,
+			newFailureCount,
+		});
+
+		return newFailureCount;
+	});
+
+/**
+ * Mark worker as failed state.
+ */
+const markWorkerFailed = (machineId: string, reason: string): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
+	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		const { client } = yield* RedisService;
+		const now = Date.now();
+
+		// Get existing entry to preserve createdAt
+		const existingEntry = yield* Effect.tryPromise({
+			try: async () => {
+				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
+				if (data) {
+					try {
+						const parsed = JSON.parse(data);
+						return {
+							state: parsed.state || "running",
+							lastActiveAt: Number(parsed.lastActiveAt) || now,
+							createdAt: Number(parsed.createdAt) || now,
+							failureCount: Number(parsed.failureCount || 0),
+						};
+					} catch {
+						return null;
+					}
+				}
+				return null;
+			},
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+
+		const createdAt = existingEntry?.createdAt || now;
+		const failureCount = existingEntry?.failureCount ?? 0;
+
+		// Update pool entry to failed state
+		yield* Effect.tryPromise({
+			try: async () => {
+				await client.hset(RedisKeys.machinesPool, {
+					[machineId]: JSON.stringify({
+						state: "failed",
+						lastActiveAt: now,
+						createdAt,
+						failureCount,
+					}),
+				});
+			},
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+
+		yield* logger.error("Worker marked as failed", undefined, { machineId, reason, failureCount });
+	});
+
+/**
+ * Mark job as failed (internal helper, used by handleJobFailure).
+ */
+const failJobInternal = (jobId: string, error: string): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 		const startTime = Date.now();
-		yield* logger.debug("[failJob] Entering", { jobId, error });
+		yield* logger.debug("[failJobInternal] Entering", { jobId, error });
 		const pipe = client.pipeline();
 		pipe.hset(RedisKeys.jobStatus(jobId), {
 			status: "failed",
@@ -354,5 +563,96 @@ export const failJob = (jobId: string, error: string): Effect.Effect<void, Redis
 			}),
 		});
 		const execDuration = Date.now() - startTime;
-		yield* logger.debug("[failJob] Exiting", { jobId, error, execDuration: `${execDuration}ms` });
+		yield* logger.debug("[failJobInternal] Exiting", { jobId, error, execDuration: `${execDuration}ms` });
+	});
+
+/**
+ * Handle job failure with retry logic and worker failure tracking.
+ *
+ * Flow:
+ * 1. Get current job retry count
+ * 2. If retries < MAX_JOB_RETRIES: requeue job (increment job retry count)
+ * 3. If retries >= MAX_JOB_RETRIES: mark job as failed
+ * 4. Increment worker failure count
+ * 5. If worker failure count >= MAX_WORKER_FAILURES: mark worker as "failed"
+ *
+ * @param jobId - The job ID that failed
+ * @param machineId - The machine ID that was processing the job
+ * @param error - Error message describing the failure
+ */
+export const handleJobFailure = (
+	jobId: string,
+	machineId: string,
+	error: string,
+): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
+	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		const { client } = yield* RedisService;
+
+		// Get current job retry count
+		const jobData = yield* Effect.tryPromise({
+			try: () => client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId)),
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		});
+
+		if (!jobData || Object.keys(jobData).length === 0) {
+			yield* logger.error("Job not found when handling failure", undefined, { jobId });
+			return;
+		}
+
+		const retries = Number(jobData.retries || 0);
+
+		// Handle job retry logic
+		if (retries < MAX_JOB_RETRIES) {
+			// Requeue job for retry
+			const requeued = yield* requeueJob(jobId);
+			if (requeued) {
+				yield* logger.info("Job requeued for retry", { jobId, retries: retries + 1 });
+			}
+		} else {
+			// Max retries exceeded, mark job as failed
+			yield* failJobInternal(jobId, error);
+			yield* logger.info("Job failed - max retries exceeded", { jobId, retries });
+		}
+
+		// Increment worker failure count
+		const newFailureCount = yield* incrementWorkerFailureCount(machineId);
+
+		// Check if worker should be marked as failed
+		if (newFailureCount >= MAX_WORKER_FAILURES) {
+			yield* markWorkerFailed(machineId, `Worker failed ${newFailureCount} jobs`);
+			yield* updateMachineState(machineId, "failed");
+		}
+	});
+
+/**
+ * Mark job as failed (legacy function, now wraps handleJobFailure).
+ * @deprecated Use handleJobFailure instead for proper retry and worker tracking.
+ */
+export const failJob = (jobId: string, error: string): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
+	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		// Try to get machineId from job data, fallback to empty string if not found
+		const { client } = yield* RedisService;
+		const jobDataResult = yield* Effect.tryPromise({
+			try: () => client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId)),
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		}).pipe(
+			Effect.catchAll(() => Effect.succeed(null as Record<string, string> | null)),
+		);
+
+		const machineId = jobDataResult?.machineId || "";
+		if (machineId) {
+			yield* handleJobFailure(jobId, machineId, error);
+		} else {
+			// Fallback to direct failure if machineId not found
+			yield* logger.warn("failJob called without machineId, using direct failure", { jobId });
+			yield* failJobInternal(jobId, error);
+		}
 	});

@@ -90,9 +90,10 @@ export interface JobData {
 
 export interface MachinePoolEntry {
 	readonly machineId: string;
-	readonly state: "running" | "idle" | "stopped";
+	readonly state: "running" | "idle" | "stopped" | "failed";
 	readonly lastActiveAt: number; // Unix timestamp ms
 	readonly createdAt: number; // Unix timestamp ms
+	readonly failureCount?: number; // Number of jobs this worker has failed
 }
 
 // =============================================================================
@@ -129,6 +130,9 @@ export const RWOS_CONFIG = {
 
 	/** Buffer time after presigned URL expiry before recovery kicks in (5 minutes) */
 	UPLOADING_RECOVERY_BUFFER_SECONDS: 300,
+
+	/** Maximum worker failures before marking worker as failed */
+	MAX_WORKER_FAILURES: 3,
 } as const;
 
 // =============================================================================
@@ -205,6 +209,7 @@ export const serializeMachinePoolEntry = (entry: MachinePoolEntry): string => {
 		state: entry.state,
 		lastActiveAt: entry.lastActiveAt,
 		createdAt: entry.createdAt,
+		...(entry.failureCount !== undefined && { failureCount: entry.failureCount }),
 	});
 };
 
@@ -220,6 +225,7 @@ export const deserializeMachinePoolEntry = (machineId: string, data: string | nu
 			state: parsed.state || "running",
 			lastActiveAt: Number(parsed.lastActiveAt) || Date.now(),
 			createdAt: Number(parsed.createdAt) || Date.now(),
+			failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 		};
 	} catch {
 		return null;

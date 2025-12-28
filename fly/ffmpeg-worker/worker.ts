@@ -29,7 +29,7 @@ import {
 	makeEffectLoggerLayer,
 	makeLoggerLayer,
 } from "../../packages/logger";
-import { LEASE_CONFIG, cleanupWorker, completeJob, failJob, getJobData, initializeWorker, popJob, updateMachineState } from "./lease";
+import { LEASE_CONFIG, cleanupWorker, completeJob, handleJobFailure, getJobData, initializeWorker, popJob, updateMachineState } from "./lease";
 import { R2ClientService, extractR2Key, getTempFilePath } from "./r2-client";
 import { makeR2ClientLayer } from "./r2-client";
 import { makeRedisLayer } from "./redis-client";
@@ -312,6 +312,8 @@ const processJob = (jobId: string) =>
 			? config.outputQualities.map((q) => getTempFilePath(jobId, `output-${q}.mp4`))
 			: [getTempFilePath(jobId, "output.mp4")];
 
+		const machineId = process.env.FLY_MACHINE_ID || `local-${Date.now()}`;
+
 		const result = yield* Effect.gen(function* () {
 			// Download
 			yield* downloadInput(config.inputUrl, localInputPath);
@@ -332,7 +334,8 @@ const processJob = (jobId: string) =>
 					const duration = (Date.now() - startTime) / 1000;
 					return Effect.gen(function* () {
 						yield* logJobFailed(jobLogger, config.jobId, errorMessage, duration);
-						yield* failJob(jobId, errorMessage);
+						// Use shared failure handler which handles retries and worker failure tracking
+						yield* handleJobFailure(jobId, machineId, errorMessage);
 						yield* notifyWebhook(config, [], duration, errorMessage);
 						return null; // Return null to indicate failure was handled
 					});
@@ -484,17 +487,18 @@ async function markActiveJobFailed(reason: string): Promise<void> {
 		return; // No active job to mark as failed
 	}
 
+	const machineId = process.env.FLY_MACHINE_ID || `local-${Date.now()}`;
 	console.error(`[Crash Recovery] Marking job ${jobId} as failed: ${reason}`);
 
 	try {
-		// Create a minimal Redis program to mark job as failed
-		const markFailedProgram = failJob(jobId, `Worker crashed: ${reason}`).pipe(
+		// Create a minimal Redis program to handle job failure (includes retry logic and worker tracking)
+		const markFailedProgram = handleJobFailure(jobId, machineId, `Worker crashed: ${reason}`).pipe(
 			Effect.provide(Layer.mergeAll(loggerLayer, effectLoggerLayer, makeRedisLayer)),
 		);
 		await Effect.runPromise(markFailedProgram);
-		console.error(`[Crash Recovery] Successfully marked job ${jobId} as failed`);
+		console.error(`[Crash Recovery] Successfully handled job ${jobId} failure`);
 	} catch (error) {
-		console.error(`[Crash Recovery] Failed to mark job ${jobId} as failed:`, error);
+		console.error(`[Crash Recovery] Failed to handle job ${jobId} failure:`, error);
 	}
 }
 

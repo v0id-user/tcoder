@@ -362,9 +362,9 @@ export const addMachineToPool = (machineId: string): Effect.Effect<void, RedisEr
 	});
 
 /**
- * Update machine state in pool (running/idle).
+ * Update machine state in pool (running/idle/failed).
  */
-export const updateMachineState = (machineId: string, state: "running" | "idle"): Effect.Effect<void, RedisError, RedisService> =>
+export const updateMachineState = (machineId: string, state: "running" | "idle" | "failed"): Effect.Effect<void, RedisError, RedisService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 		const now = Date.now();
