@@ -169,3 +169,4 @@ dist
 
 scripts/video/*
 scripts/tcoder-videos/*
+scripts/__pycache__/*
