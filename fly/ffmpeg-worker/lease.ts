@@ -7,7 +7,6 @@
 
 import { Effect } from "effect";
 import { LoggerService, logLeaseCleanup, logLeaseInitialized, logLeaseStateUpdate } from "../../packages/logger";
-import { RWOS_CONFIG } from "../../src/redis/schema";
 import { type RedisError, RedisService, redisEffect } from "./redis-client";
 
 // =============================================================================
@@ -19,9 +18,9 @@ export const LEASE_CONFIG = {
 	POLL_INTERVAL_MS: 5_000,
 } as const;
 
-// Import failure tracking constants from schema
-const MAX_JOB_RETRIES = RWOS_CONFIG.MAX_JOB_RETRIES;
-const MAX_WORKER_FAILURES = RWOS_CONFIG.MAX_WORKER_FAILURES;
+// Failure tracking constants (duplicated from src/redis/schema to avoid Docker path issues)
+const MAX_JOB_RETRIES = 3;
+const MAX_WORKER_FAILURES = 3;
 
 // =============================================================================
 // Redis Keys (duplicated here to avoid cross-package imports)
@@ -643,9 +642,7 @@ export const failJob = (jobId: string, error: string): Effect.Effect<void, Redis
 				_tag: "CommandError" as const,
 				reason: e instanceof Error ? e.message : String(e),
 			}),
-		}).pipe(
-			Effect.catchAll(() => Effect.succeed(null as Record<string, string> | null)),
-		);
+		}).pipe(Effect.catchAll(() => Effect.succeed(null as Record<string, string> | null)));
 
 		const machineId = jobDataResult?.machineId || "";
 		if (machineId) {

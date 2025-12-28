@@ -217,4 +217,3 @@ export const handleJobFailure = (
 			workerFailureCount: newFailureCount,
 		};
 	});
-

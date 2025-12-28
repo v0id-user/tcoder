@@ -29,7 +29,16 @@ import {
 	makeEffectLoggerLayer,
 	makeLoggerLayer,
 } from "../../packages/logger";
-import { LEASE_CONFIG, cleanupWorker, completeJob, handleJobFailure, getJobData, initializeWorker, popJob, updateMachineState } from "./lease";
+import {
+	LEASE_CONFIG,
+	cleanupWorker,
+	completeJob,
+	handleJobFailure,
+	getJobData,
+	initializeWorker,
+	popJob,
+	updateMachineState,
+} from "./lease";
 import { R2ClientService, extractR2Key, getTempFilePath } from "./r2-client";
 import { makeR2ClientLayer } from "./r2-client";
 import { makeRedisLayer } from "./redis-client";

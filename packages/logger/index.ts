@@ -5,7 +5,7 @@
  * Supports log levels, metadata, and scoped loggers for components, machines, and jobs.
  */
 
-import { Context, Effect, Layer, Logger, LogLevel } from "effect";
+import { Context, Effect, Layer, Logger, LogLevel as EffectLogLevel } from "effect";
 
 // =============================================================================
 // Types
@@ -188,18 +188,18 @@ export const makeLoggerLayer = (config: LoggerConfig): Layer.Layer<LoggerService
 /**
  * Maps custom log levels to Effect's log levels.
  */
-const mapToEffectLogLevel = (level: LogLevel): LogLevel.LogLevel => {
+const mapToEffectLogLevel = (level: LogLevel): EffectLogLevel.LogLevel => {
 	switch (level) {
 		case "debug":
-			return LogLevel.Debug;
+			return EffectLogLevel.Debug;
 		case "info":
-			return LogLevel.Info;
+			return EffectLogLevel.Info;
 		case "warn":
-			return LogLevel.Warning;
+			return EffectLogLevel.Warning;
 		case "error":
-			return LogLevel.Error;
+			return EffectLogLevel.Error;
 		default:
-			return LogLevel.Info;
+			return EffectLogLevel.Info;
 	}
 };
 
@@ -312,7 +312,11 @@ export const logLeaseInitialized = (logger: LoggerImpl, machineId: string): Effe
 /**
  * Log lease state update
  */
-export const logLeaseStateUpdate = (logger: LoggerImpl, machineId: string, state: "running" | "idle" | "failed"): Effect.Effect<void, never, never> =>
+export const logLeaseStateUpdate = (
+	logger: LoggerImpl,
+	machineId: string,
+	state: "running" | "idle" | "failed",
+): Effect.Effect<void, never, never> =>
 	logger.debug("Lease state updated", {
 		machineId,
 		state,
