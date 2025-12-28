@@ -20,7 +20,8 @@ interface R2Config {
 	readonly accountId: string;
 	readonly accessKeyId: string;
 	readonly secretAccessKey: string;
-	readonly bucketName: string;
+	readonly inputBucketName: string;
+	readonly outputBucketName: string;
 	readonly endpoint?: string; // R2 endpoint URL
 }
 
@@ -50,20 +51,24 @@ const getR2Config = Effect.sync((): R2Config => {
 	const accountId = process.env.R2_ACCOUNT_ID;
 	const accessKeyId = process.env.R2_ACCESS_KEY_ID;
 	const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+	const inputBucketName = process.env.R2_INPUT_BUCKET_NAME;
 	// Support both R2_OUTPUT_BUCKET_NAME (new) and R2_BUCKET_NAME (legacy)
-	const bucketName = process.env.R2_OUTPUT_BUCKET_NAME || process.env.R2_BUCKET_NAME;
+	const outputBucketName = process.env.R2_OUTPUT_BUCKET_NAME || process.env.R2_BUCKET_NAME;
 	const endpoint = process.env.R2_ENDPOINT;
 
 	const missing: string[] = [];
 	if (!accountId) missing.push("R2_ACCOUNT_ID");
 	if (!accessKeyId) missing.push("R2_ACCESS_KEY_ID");
 	if (!secretAccessKey) missing.push("R2_SECRET_ACCESS_KEY");
-	if (!bucketName) missing.push("R2_OUTPUT_BUCKET_NAME");
+	if (!inputBucketName) missing.push("R2_INPUT_BUCKET_NAME");
+	if (!outputBucketName) missing.push("R2_OUTPUT_BUCKET_NAME");
 
 	if (missing.length > 0) {
 		// Use console.error here as this is called during module initialization
 		// before Effect runtime is available
-		console.error("Missing environment variables:", missing.join(", "));
+		console.error("[R2 Client] FATAL: Missing required environment variables:", missing.join(", "));
+		console.error("[R2 Client] The worker cannot start without R2 credentials.");
+		console.error("[R2 Client] Ensure these are set in .env file or docker-compose environment.");
 		process.exit(1);
 	}
 
@@ -72,7 +77,8 @@ const getR2Config = Effect.sync((): R2Config => {
 		accountId: accountId as string,
 		accessKeyId: accessKeyId as string,
 		secretAccessKey: secretAccessKey as string,
-		bucketName: bucketName as string,
+		inputBucketName: inputBucketName as string,
+		outputBucketName: outputBucketName as string,
 		endpoint,
 	};
 });
@@ -168,6 +174,8 @@ const downloadFromR2 = (url: string, localPath: string): Effect.Effect<void, R2E
 				const { client } = yield* S3ClientService;
 				const { bucket, key } = parsedR2Url;
 
+				yield* logger.debug("Using direct S3 SDK access", { bucket, key });
+
 				const command = new GetObjectCommand({
 					Bucket: bucket,
 					Key: key,
@@ -177,10 +185,15 @@ const downloadFromR2 = (url: string, localPath: string): Effect.Effect<void, R2E
 					try: async () => await client.send(command),
 					catch: (error) => {
 						const reason = error instanceof Error ? error.message : String(error);
+						// Provide helpful error message for access denied
+						const isAccessDenied = reason.toLowerCase().includes("access denied") || reason.toLowerCase().includes("accessdenied");
+						const enhancedReason = isAccessDenied
+							? `R2 Access Denied for bucket '${bucket}'. Check that R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY have read permissions on the INPUT bucket. Original error: ${reason}`
+							: reason;
 						return {
 							_tag: "S3ClientError" as const,
 							operation: "GetObject",
-							reason,
+							reason: enhancedReason,
 						} as R2Error;
 					},
 				});
@@ -228,7 +241,7 @@ const downloadFromR2 = (url: string, localPath: string): Effect.Effect<void, R2E
 				return yield* Effect.fail({
 					_tag: "DownloadFailed",
 					url,
-					reason: "Invalid R2 URL format. Expected presigned URL or direct R2 URL.",
+					reason: `Invalid R2 URL format. Expected presigned URL (with query params) or direct R2 URL (https://ACCOUNT_ID.r2.cloudflarestorage.com/BUCKET/KEY). Got: ${url.substring(0, 100)}...`,
 				} as R2Error);
 			}
 
@@ -304,7 +317,7 @@ const uploadToR2 = (
 
 			// Upload to R2 using PutObjectCommand
 			const command = new PutObjectCommand({
-				Bucket: config.bucketName,
+				Bucket: config.outputBucketName,
 				Key: r2Key,
 				Body: fileBuffer,
 				ContentType: getContentType(r2Key),
@@ -315,10 +328,15 @@ const uploadToR2 = (
 				try: async () => await client.send(command),
 				catch: (error) => {
 					const reason = error instanceof Error ? error.message : String(error);
+					// Provide helpful error message for access denied
+					const isAccessDenied = reason.toLowerCase().includes("access denied") || reason.toLowerCase().includes("accessdenied");
+					const enhancedReason = isAccessDenied
+						? `R2 Access Denied for bucket '${config.outputBucketName}'. Check that R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY have write permissions on the OUTPUT bucket. Original error: ${reason}`
+						: reason;
 					return {
 						_tag: "S3ClientError" as const,
 						operation: "PutObject",
-						reason,
+						reason: enhancedReason,
 					} as R2Error;
 				},
 			});
@@ -326,7 +344,7 @@ const uploadToR2 = (
 			// Construct and return R2 URL
 			const r2Url = config.endpoint
 				? `${config.endpoint}/${r2Key}`
-				: `https://${config.accountId}.r2.cloudflarestorage.com/${config.bucketName}/${r2Key}`;
+				: `https://${config.accountId}.r2.cloudflarestorage.com/${config.outputBucketName}/${r2Key}`;
 
 			yield* logR2Upload(logger, localPath, r2Key, r2Url, fileStats.size);
 

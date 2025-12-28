@@ -1,6 +1,19 @@
 # Docker Compose for local development
 # Uses Serverless Redis HTTP (SRH) to emulate Upstash API locally
 # https://upstash.com/docs/redis/sdks/ts/developing
+#
+# ============================================================================
+# REQUIRED: Create .env file with R2 credentials before running!
+# ============================================================================
+# Copy env.local.example to .env and fill in:
+#   - R2_ACCOUNT_ID
+#   - R2_ACCESS_KEY_ID (must have READ access to INPUT bucket, WRITE to OUTPUT)
+#   - R2_SECRET_ACCESS_KEY
+#   - R2_INPUT_BUCKET_NAME (default: tcoder-input)
+#   - R2_OUTPUT_BUCKET_NAME (default: tcoder-output)
+#
+# The fly-worker WILL NOT START without these variables!
+# ============================================================================
 
 services:
   redis:
@@ -30,17 +43,38 @@ services:
       dockerfile: fly/Dockerfile
     container_name: tcoder-fly-worker
     environment:
-      # Local SRH emulates Upstash HTTP API
+      # ========================================
+      # Redis (provided by local SRH proxy)
+      # ========================================
       UPSTASH_REDIS_REST_URL: http://serverless-redis-http:80
       UPSTASH_REDIS_REST_TOKEN: local_dev_token
-      # Webhook base URL to host machine (RPC client constructs full path)
+
+      # ========================================
+      # Webhook (for job completion callbacks)
+      # ========================================
       # Access wrangler dev server running on host at http://localhost:8787
       # Requires: wrangler dev must be running on the host machine
       WEBHOOK_URL: http://host.docker.internal:8787
-      # Local dev machine ID
+
+      # ========================================
+      # Worker Identity
+      # ========================================
       FLY_MACHINE_ID: local-dev-worker
-      # Debug logging for local development
       LOG_LEVEL: debug
+
+      # ========================================
+      # R2 Credentials (REQUIRED - from .env file)
+      # ========================================
+      # These are loaded from .env via env_file directive:
+      # - R2_ACCOUNT_ID
+      # - R2_ACCESS_KEY_ID
+      # - R2_SECRET_ACCESS_KEY
+      # - R2_INPUT_BUCKET_NAME
+      # - R2_OUTPUT_BUCKET_NAME
+      #
+      # IMPORTANT: R2 credentials must have:
+      # - READ access to INPUT bucket (for downloading source videos)
+      # - WRITE access to OUTPUT bucket (for uploading transcoded videos)
     env_file:
       - .env
     extra_hosts:
