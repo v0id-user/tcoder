@@ -10,9 +10,9 @@
  */
 
 import { Context, Effect } from "effect";
+import { LoggerService, logMachineCreated, logMachineStatus, makeLoggerLayer } from "../packages/logger";
 import { flyClient } from "./fly-client";
 import type { Components, Machine, Paths } from "./fly-machine-apis";
-import { LoggerService, logMachineCreated, logMachineStatus, makeLoggerLayer } from "../packages/logger";
 
 // Configuration
 interface FlyConfig {
@@ -94,7 +94,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 					cpu_kind: "shared",
 					cpus: 1,
 					memory_mb: 512,
-					persist_rootfs: "never"
+					persist_rootfs: "never",
 				},
 				restart: {
 					policy: "no",

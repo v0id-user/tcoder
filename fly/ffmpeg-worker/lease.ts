@@ -277,14 +277,11 @@ export const getJobData = (jobId: string): Effect.Effect<Record<string, string> 
 		const logger = yield* LoggerService;
 		const startTime = Date.now();
 		yield* logger.debug("[getJobData] Entering", { jobId });
-		const result = yield* redisEffect(
-			async (client) => {
-				const data = await client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId));
-				// Upstash returns null if key doesn't exist
-				return data && Object.keys(data).length > 0 ? data : null;
-			},
-			"getJobData",
-		);
+		const result = yield* redisEffect(async (client) => {
+			const data = await client.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId));
+			// Upstash returns null if key doesn't exist
+			return data && Object.keys(data).length > 0 ? data : null;
+		}, "getJobData");
 		const duration = Date.now() - startTime;
 		yield* logger.debug("[getJobData] Exiting", { jobId, found: result !== null, duration: `${duration}ms` });
 		return result;

@@ -19,15 +19,15 @@ import { unlink } from "node:fs/promises";
 import { $ } from "bun";
 import { Effect, Exit, Layer } from "effect";
 import {
-	LoggerService,
 	type LogLevel,
+	LoggerService,
 	logJobCompleted,
 	logJobFailed,
 	logJobStarted,
 	logWorkerStarted,
 	logWorkerStopped,
-	makeLoggerLayer,
 	makeEffectLoggerLayer,
+	makeLoggerLayer,
 } from "../../packages/logger";
 import { LEASE_CONFIG, cleanupWorker, completeJob, failJob, getJobData, initializeWorker, popJob, updateMachineState } from "./lease";
 import { R2ClientService, extractR2Key, getTempFilePath } from "./r2-client";
@@ -325,7 +325,8 @@ const processJob = (jobId: string) =>
 
 			return outputs;
 		}).pipe(
-			Effect.match({
+			// Use matchEffect to properly execute the returned Effects
+			Effect.matchEffect({
 				onFailure: (error) => {
 					const errorMessage = error instanceof Error ? error.message : String(error);
 					const duration = (Date.now() - startTime) / 1000;
@@ -333,6 +334,7 @@ const processJob = (jobId: string) =>
 						yield* logJobFailed(jobLogger, config.jobId, errorMessage, duration);
 						yield* failJob(jobId, errorMessage);
 						yield* notifyWebhook(config, [], duration, errorMessage);
+						return null; // Return null to indicate failure was handled
 					});
 				},
 				onSuccess: (outputs) => {
@@ -343,6 +345,7 @@ const processJob = (jobId: string) =>
 						// Save outputs directly to Redis for reliability (webhook is a backup)
 						yield* completeJob(jobId, duration, jobOutputs);
 						yield* notifyWebhook(config, outputs, duration);
+						return outputs; // Return outputs to indicate success
 					});
 				},
 			}),

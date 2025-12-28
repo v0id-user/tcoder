@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type SpawnConfig, maybeSpawnWorker, spawnWorker } from "../src/orchestration/spawner";
 import { RWOS_CONFIG, RedisKeys } from "../src/redis/schema";
+import { serializeMachinePoolEntry } from "../src/redis/schema";
 import {
 	MockRedis,
 	createMockRedisLayer,
@@ -16,7 +17,6 @@ import {
 	runWithMockRedis,
 	runWithMockRedisExit,
 } from "./test-helpers";
-import { serializeMachinePoolEntry } from "../src/redis/schema";
 
 // Mock fly-client module
 vi.mock("../fly/fly-client", () => {

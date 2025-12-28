@@ -3,9 +3,9 @@ import { Redis } from "@upstash/redis/cloudflare";
 import { Effect } from "effect";
 import { Hono } from "hono";
 import { z } from "zod";
-import { maybeSpawnWorker, type SpawnConfig } from "../orchestration/spawner";
+import { type SpawnConfig, maybeSpawnWorker } from "../orchestration/spawner";
 import { makeRedisLayer } from "../redis/client";
-import { RWOS_CONFIG, RedisKeys, deserializeJobData, serializeJobData, type JobData } from "../redis/schema";
+import { type JobData, RWOS_CONFIG, RedisKeys, deserializeJobData, serializeJobData } from "../redis/schema";
 import { submitJobSchema } from "./schemas";
 import type { Env } from "./types";
 

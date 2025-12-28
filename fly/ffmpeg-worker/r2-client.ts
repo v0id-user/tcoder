@@ -6,12 +6,12 @@
  * Implements Cloudflare R2 S3 API compatibility using AWS S3 SDK.
  */
 
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import type { Readable } from "node:stream";
 import { readFile, writeFile } from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Context, Effect, Layer, Schedule, pipe } from "effect";
 import { LoggerService, logR2Download, logR2Upload } from "../../packages/logger";
 
@@ -84,19 +84,40 @@ const getR2Config = Effect.sync((): R2Config => {
 });
 
 // Extract bucket and key from R2 URL
+// Supports two URL formats:
+// 1. Virtual-hosted style: https://<BUCKET>.<ACCOUNT_ID>.r2.cloudflarestorage.com/<KEY>
+// 2. Path style: https://<ACCOUNT_ID>.r2.cloudflarestorage.com/<BUCKET>/<KEY>
 const parseR2Url = (url: string): { bucket: string; key: string } | null => {
 	try {
 		const urlObj = new URL(url);
-		if (urlObj.hostname.includes("r2.cloudflarestorage.com")) {
-			// Format: https://<ACCOUNT_ID>.r2.cloudflarestorage.com/<BUCKET>/<KEY>
-			const pathParts = urlObj.pathname.split("/").filter(Boolean);
-			if (pathParts.length >= 2) {
-				return {
-					bucket: pathParts[0],
-					key: pathParts.slice(1).join("/"),
-				};
+		if (!urlObj.hostname.includes("r2.cloudflarestorage.com")) {
+			return null;
+		}
+
+		// Check for virtual-hosted style (bucket is first subdomain)
+		// Example: tcoder-input.c498b3e3af06d8f6316dc6cbe97a4695.r2.cloudflarestorage.com
+		const hostParts = urlObj.hostname.split(".");
+		const r2Index = hostParts.findIndex((part) => part === "r2");
+
+		if (r2Index >= 2) {
+			// Virtual-hosted style: bucket is everything before account ID
+			// hostParts: [bucket, accountId, "r2", "cloudflarestorage", "com"]
+			const bucket = hostParts.slice(0, r2Index - 1).join(".");
+			const key = urlObj.pathname.replace(/^\//, ""); // Remove leading slash
+			if (bucket && key) {
+				return { bucket, key };
 			}
 		}
+
+		// Path style fallback: https://<ACCOUNT_ID>.r2.cloudflarestorage.com/<BUCKET>/<KEY>
+		const pathParts = urlObj.pathname.split("/").filter(Boolean);
+		if (pathParts.length >= 2) {
+			return {
+				bucket: pathParts[0],
+				key: pathParts.slice(1).join("/"),
+			};
+		}
+
 		return null;
 	} catch {
 		return null;

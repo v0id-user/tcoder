@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Redis } from "@upstash/redis/cloudflare";
 import { Hono } from "hono";
 import { createR2Client, generateInputKey, generateUploadUrl } from "../r2/presigned";
-import { RWOS_CONFIG, RedisKeys, serializeJobData, type JobData } from "../redis/schema";
+import { type JobData, RWOS_CONFIG, RedisKeys, serializeJobData } from "../redis/schema";
 import { uploadRequestSchema } from "./schemas";
 import type { Env } from "./types";
 

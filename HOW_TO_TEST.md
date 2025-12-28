@@ -12,7 +12,7 @@ cp env.local.example .dev.vars
 
 2. **Fill in R2 credentials** in both `.env` and `.dev.vars`:
    - `R2_ACCOUNT_ID`
-   - `R2_ACCESS_KEY_ID`
+   - `R2_ACCESS_KEY_ID` (must have READ access to input bucket, WRITE to output bucket)
    - `R2_SECRET_ACCESS_KEY`
 
 3. **Start the service:**
@@ -21,6 +21,99 @@ bun run dev
 ```
 
 The API will be available at `http://localhost:8787`
+
+---
+
+## Important: Local Testing Limitations
+
+### Why Upload Flow Doesn't Work Locally
+
+The **upload flow** (`POST /api/upload`) relies on R2 event notifications to transition jobs from "uploading" to "pending" status. In local development:
+
+- R2 events are **not delivered** to the local wrangler dev server
+- Jobs will stay stuck in "uploading" status forever
+- The recovery cron only runs every 65 minutes
+
+### Solution: Use Direct Job Submission
+
+For local testing, use the **direct job submission** endpoint (`POST /api/jobs`) which:
+- Bypasses the R2 event system entirely
+- Immediately queues jobs as "pending"
+- Works reliably in local development
+
+---
+
+## Quick Start (Local Testing - Recommended)
+
+### Step 1: Verify Services Are Running
+
+```bash
+curl http://localhost:8787/api/status
+```
+
+You should see `"redis": {"connected": true}`.
+
+### Step 2: Upload a Video to R2 Manually
+
+First, upload a test video to your R2 INPUT bucket. You can do this via:
+- Cloudflare Dashboard > R2 > Your Bucket > Upload
+- Or use the presigned URL flow (just the upload part)
+
+Note the full R2 URL of your uploaded video, e.g.:
+```
+https://tcoder-input.<ACCOUNT_ID>.r2.cloudflarestorage.com/test-videos/sample.mp4
+```
+
+### Step 3: Submit Job Directly (Bypasses R2 Events)
+
+```bash
+curl -X POST "http://localhost:8787/api/jobs" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputUrl": "https://tcoder-input.<ACCOUNT_ID>.r2.cloudflarestorage.com/test-videos/sample.mp4",
+    "outputUrl": "outputs/test-job",
+    "preset": "web-optimized",
+    "outputQualities": ["720p"]
+  }'
+```
+
+**Replace `<ACCOUNT_ID>` with your actual Cloudflare account ID.**
+
+**Expected response:**
+```json
+{
+  "jobId": "abc123-...",
+  "status": "pending",
+  "machineId": null,
+  "queuedAt": 1703510400000
+}
+```
+
+**Save the `jobId` for the next step.**
+
+### Step 4: Check Job Status
+
+```bash
+curl "http://localhost:8787/api/jobs/<JOB_ID>"
+```
+
+Poll this endpoint every 10-30 seconds until status is `completed` or `failed`.
+
+**Status flow:**
+```
+pending → running → completed
+                 → failed
+```
+
+### Step 5: Check Worker Logs
+
+If the job isn't processing, check the worker logs:
+
+```bash
+docker logs tcoder-fly-worker -f
+```
+
+You should see the worker picking up the job and processing it.
 
 ---
 
@@ -46,9 +139,30 @@ If you have `ffmpeg` installed:
 ffmpeg -f lavfi -i testsrc=duration=10:size=1280x720:rate=30 -pix_fmt yuv420p test-video.mp4
 ```
 
+### Upload Test Video to R2
+
+1. Download a test video:
+```bash
+curl -o test-video.mp4 "https://download.blender.org/demo/movies/BBB/big_buck_bunny_720p_1mb.mp4"
+```
+
+2. Upload to R2 via Cloudflare Dashboard:
+   - Go to Cloudflare Dashboard > R2
+   - Select your INPUT bucket (e.g., `tcoder-input`)
+   - Click "Upload" and select your video
+   - Note the object path (e.g., `test-videos/test-video.mp4`)
+
+3. Construct the full URL:
+```
+https://<BUCKET_NAME>.<ACCOUNT_ID>.r2.cloudflarestorage.com/<OBJECT_PATH>
+```
+
 ---
 
-## Testing Workflow
+## Full Upload Flow (Works in Production, Limited Locally)
+
+> **Note:** This flow relies on R2 events which don't work locally.
+> Use the "Quick Start" section above for local testing.
 
 ### Step 1: Health Check
 
@@ -152,55 +266,14 @@ curl "http://localhost:8787/api/jobs/<JOB_ID_FROM_STEP_3>"
 
 **Run this command repeatedly** (every 10-30 seconds) until status is `completed` or `failed`.
 
-**Status flow:**
+**Status flow (upload flow):**
 ```
 uploading → queued → pending → running → completed
                                       → failed
 ```
 
-**Example response (running):**
-```json
-{
-  "jobId": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "running",
-  "machineId": "local-dev-worker",
-  "outputs": null,
-  "error": null,
-  "timestamps": {
-    "createdAt": 1703516400000,
-    "uploadedAt": 1703516401000,
-    "queuedAt": 1703516402000,
-    "startedAt": 1703516403000
-  },
-  "filename": "test-video.mp4",
-  "preset": "web-optimized"
-}
-```
-
-**Example response (completed):**
-```json
-{
-  "jobId": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "completed",
-  "machineId": "local-dev-worker",
-  "outputs": [
-    {
-      "quality": "720p",
-      "url": "https://xxx.r2.cloudflarestorage.com/tcoder-output/outputs/550e8400.../720p.mp4"
-    }
-  ],
-  "error": null,
-  "timestamps": {
-    "createdAt": 1703516400000,
-    "uploadedAt": 1703516401000,
-    "queuedAt": 1703516402000,
-    "startedAt": 1703516403000,
-    "completedAt": 1703516500000
-  },
-  "filename": "test-video.mp4",
-  "preset": "web-optimized"
-}
-```
+> **Local Issue:** Jobs will stay in "uploading" status because R2 events don't trigger locally.
+> Use the direct job submission flow instead.
 
 ---
 
@@ -230,6 +303,43 @@ curl http://localhost:8787/api/stats
 
 ---
 
+## Queue Verification
+
+### Check Pending Jobs Queue
+
+To verify jobs are being queued correctly, you can check Redis directly:
+
+```bash
+curl -X POST http://localhost:8079 \
+  -H "Authorization: Bearer local_dev_token" \
+  -H "Content-Type: application/json" \
+  -d '["ZRANGE", "jobs:pending", "0", "-1"]'
+```
+
+This shows all job IDs in the pending queue.
+
+### Check Job Status in Redis
+
+```bash
+curl -X POST http://localhost:8079 \
+  -H "Authorization: Bearer local_dev_token" \
+  -H "Content-Type: application/json" \
+  -d '["HGETALL", "jobs:status:<JOB_ID>"]'
+```
+
+Replace `<JOB_ID>` with your actual job ID.
+
+### Check Active Machines
+
+```bash
+curl -X POST http://localhost:8079 \
+  -H "Authorization: Bearer local_dev_token" \
+  -H "Content-Type: application/json" \
+  -d '["HGETALL", "machines:pool"]'
+```
+
+---
+
 ## Additional Test Scenarios
 
 ### Test Multiple Output Qualities
@@ -237,10 +347,11 @@ curl http://localhost:8787/api/stats
 Request multiple output qualities:
 
 ```bash
-curl -X POST "http://localhost:8787/api/upload" \
+curl -X POST "http://localhost:8787/api/jobs" \
   -H "Content-Type: application/json" \
   -d '{
-    "filename": "test-video.mp4",
+    "inputUrl": "https://tcoder-input.<ACCOUNT_ID>.r2.cloudflarestorage.com/test-videos/sample.mp4",
+    "outputUrl": "outputs/multi-quality-test",
     "preset": "web-optimized",
     "outputQualities": ["480p", "720p", "1080p"]
   }'
@@ -251,33 +362,58 @@ curl -X POST "http://localhost:8787/api/upload" \
 Test HLS preset:
 
 ```bash
-curl -X POST "http://localhost:8787/api/upload" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "filename": "test-video.mp4",
-    "preset": "hls",
-    "outputQualities": ["720p", "1080p"]
-  }'
-```
-
-### Direct Job Submission (Skip Upload)
-
-Submit a job with an existing input URL:
-
-```bash
 curl -X POST "http://localhost:8787/api/jobs" \
   -H "Content-Type: application/json" \
   -d '{
-    "inputUrl": "https://example.com/video.mp4",
-    "outputUrl": "outputs/my-job",
-    "preset": "web-optimized",
-    "outputQualities": ["720p"]
+    "inputUrl": "https://tcoder-input.<ACCOUNT_ID>.r2.cloudflarestorage.com/test-videos/sample.mp4",
+    "outputUrl": "outputs/hls-test",
+    "preset": "hls",
+    "outputQualities": ["720p", "1080p"]
   }'
 ```
 
 ---
 
 ## Troubleshooting
+
+### Job Stuck in "uploading" Status
+
+**Cause:** R2 events don't work locally.
+
+**Solution:** Use direct job submission (`POST /api/jobs`) instead of the upload flow.
+
+### Job Stuck in "pending" Status
+
+**Cause:** Worker not picking up jobs.
+
+**Check:**
+1. Is the worker running?
+```bash
+docker ps | grep tcoder-fly-worker
+```
+
+2. Check worker logs:
+```bash
+docker logs tcoder-fly-worker -f
+```
+
+3. Is the job in the queue?
+```bash
+curl -X POST http://localhost:8079 \
+  -H "Authorization: Bearer local_dev_token" \
+  -H "Content-Type: application/json" \
+  -d '["ZRANGE", "jobs:pending", "0", "-1"]'
+```
+
+### R2 Access Denied Error
+
+**Cause:** R2 credentials don't have proper permissions.
+
+**Check:**
+1. Verify credentials in `.env` file
+2. Ensure API token has:
+   - READ access to INPUT bucket
+   - WRITE access to OUTPUT bucket
 
 ### Service Not Responding
 
@@ -340,9 +476,9 @@ Processing time depends on:
 
 ## Notes
 
+- **Local testing:** Use `POST /api/jobs` (direct submission) - the upload flow requires R2 events
 - Presigned URLs expire after 1 hour
 - Job status is retained for 24 hours after creation
 - Maximum concurrent machines: 5 (configurable)
-- Jobs automatically recover from `uploading` status if file exists but event is delayed
+- The worker polls `jobs:pending` queue every 5 seconds
 - Check job status periodically by running the GET job status command multiple times
-

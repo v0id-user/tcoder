@@ -6,7 +6,7 @@
  */
 
 import { Effect } from "effect";
-import { createClient, type Client } from "./client";
+import { type Client, createClient } from "./client";
 
 // =============================================================================
 // Types

@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import { createJobRoutes } from "./jobs";
 import { createStatsRoutes } from "./stats";
+import type { Env } from "./types";
 import { createUploadRoutes } from "./upload";
 import { createWebhookRoutes } from "./webhooks";
-import type { Env } from "./types";
 
 const buildRoutes = () => {
 	const uploadRoutes = createUploadRoutes();
