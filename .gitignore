@@ -167,4 +167,5 @@ dist
 !.env.example
 .wrangler/
 
-video/*
+scripts/video/*
+scripts/tcoder-videos/*
