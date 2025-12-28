@@ -154,7 +154,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 		}
 
 		const createdMachine = machine.data as Components.Schemas.Machine;
-		yield* logMachineCreated(logger, createdMachine.instance_id ?? "Machine was created with no instance id", config.region);
+		yield* logMachineCreated(logger, createdMachine.id ?? "Machine was created with no id", config.region);
 
 		return createdMachine;
 	});
@@ -268,12 +268,12 @@ export const executeTranscodeJob = (job: TranscodeJob) =>
 		// Create and start machine
 		const machine = yield* createTranscodeMachine(job);
 
-		if (machine.instance_id === undefined) {
+		if (machine.id === undefined) {
 			const error: FlyApiError = {
 				_tag: "InvalidMachineResponse",
 				raw: machine,
 			};
-			yield* logger.error("Machine was created with no instance id", undefined, {
+			yield* logger.error("Machine was created with no id", undefined, {
 				jobId: job.jobId,
 				machineId: machine.id,
 				raw: machine,
@@ -282,7 +282,7 @@ export const executeTranscodeJob = (job: TranscodeJob) =>
 		}
 
 		// Wait for completion
-		const completed = yield* waitForCompletion(machine.instance_id, job.apiToken);
+		const completed = yield* waitForCompletion(machine.id, job.apiToken);
 
 		return completed;
 	});
