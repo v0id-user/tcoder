@@ -169,7 +169,10 @@ class TcoderClient:
             for output in outputs:
                 quality: str = output.get("quality", "unknown")
                 url: str = output.get("url", "N/A")
+                cdn_url: Optional[str] = output.get("cdnUrl")
                 print(f"   • {quality}: {url}")
+                if cdn_url:
+                    print(f"     CDN: {cdn_url}")
 
         timestamps: Dict[str, Any] = status.get("timestamps", {})
         if timestamps:

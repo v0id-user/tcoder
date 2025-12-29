@@ -15,7 +15,8 @@
 	"vars": {
 		"NODE_ENV": "production",
 		"R2_PUBLIC_URL": "https://pub-9a0a3b7afaee46cab843fa2067460496.r2.dev",
-		"BUNNY_CDN_URL": "https://tcoder-pull.b-cdn.net/"
+		"BUNNY_CDN_URL": "https://tcoder-pull.b-cdn.net/",
+		"WEBHOOK_BASE_URL": "https://tcoder.cloudflare-c49.workers.dev/"
 	},
 	// R2 bucket bindings
 	"r2_buckets": [
