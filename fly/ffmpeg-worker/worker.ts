@@ -259,6 +259,7 @@ const notifyWebhook = (config: JobConfig, outputs: OutputFile[], duration: numbe
 			error,
 			duration: Math.round(duration),
 		};
+		// Webhook notification is optional - errors are logged but don't fail the job
 		yield* webhookClient.notify(payload);
 		const notifyDuration = Date.now() - startTime;
 		yield* logger.debug("[notifyWebhook] Exiting", {

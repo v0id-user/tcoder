@@ -28,7 +28,7 @@ export interface WebhookPayload {
 export class WebhookClientService extends Context.Tag("WebhookClientService")<
 	WebhookClientService,
 	{
-		notify: (payload: WebhookPayload) => Effect.Effect<void, WebhookError, LoggerService>;
+		notify: (payload: WebhookPayload) => Effect.Effect<void, never, LoggerService>;
 	}
 >() {}
 
@@ -40,28 +40,21 @@ type WebhookError =
 	| { _tag: "Timeout"; url: string };
 
 // Extract base URL from WEBHOOK_URL (e.g., "http://host.docker.internal:8787/webhooks/job-complete" -> "http://host.docker.internal:8787")
-const getBaseUrl = Effect.try({
-	try: (): string => {
-		const webhookUrl = process.env.WEBHOOK_URL;
-		if (!webhookUrl) {
-			throw new Error("WEBHOOK_URL is required but not set");
-		}
-		try {
-			const url = new URL(webhookUrl);
-			// Remove the path to get base URL
-			url.pathname = "";
-			return url.toString().replace(/\/$/, ""); // Remove trailing slash
-		} catch (error) {
-			throw new Error(`Invalid WEBHOOK_URL format: ${webhookUrl}`);
-		}
-	},
-	catch: (error): WebhookError => {
-		const webhookUrl = process.env.WEBHOOK_URL || "unknown";
-		return {
-			_tag: "InvalidWebhookUrl",
-			url: webhookUrl,
-		};
-	},
+// Returns Option<string> - None if WEBHOOK_URL is not set or invalid
+const getBaseUrl = Effect.gen(function* () {
+	const webhookUrl = process.env.WEBHOOK_URL;
+	if (!webhookUrl) {
+		return yield* Effect.succeed(null);
+	}
+	try {
+		const url = new URL(webhookUrl);
+		// Remove the path to get base URL
+		url.pathname = "";
+		return url.toString().replace(/\/$/, ""); // Remove trailing slash
+	} catch (error) {
+		// Invalid URL format, return null to skip webhook
+		return yield* Effect.succeed(null);
+	}
 });
 
 // Retry schedule: exponential backoff starting at 100ms, max 3 retries
@@ -76,10 +69,21 @@ const webhookRetrySchedule = Schedule.exponential("100 millis").pipe(
 );
 
 // Send webhook notification using type-safe RPC client
-const sendWebhook = (payload: WebhookPayload): Effect.Effect<void, WebhookError, LoggerService> =>
+// Gracefully skips if WEBHOOK_URL is not set or invalid
+const sendWebhook = (payload: WebhookPayload): Effect.Effect<void, never, LoggerService> =>
 	pipe(
 		getBaseUrl,
 		Effect.flatMap((baseUrl) => {
+			// If baseUrl is null, skip webhook (WEBHOOK_URL not set or invalid)
+			if (!baseUrl) {
+				return Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.debug("Skipping webhook notification - WEBHOOK_URL not set or invalid", {
+						jobId: payload.jobId,
+					});
+				});
+			}
+
 			const webhookUrl = `${baseUrl}/webhooks/job-complete`;
 
 			return pipe(
@@ -144,7 +148,8 @@ const sendWebhook = (payload: WebhookPayload): Effect.Effect<void, WebhookError,
 					return Effect.gen(function* () {
 						const logger = yield* LoggerService;
 						yield* logWebhookError(logger, webhookUrl, payload.jobId, error);
-						return yield* Effect.fail(error);
+						// Log error but don't fail - webhook is optional
+						return Effect.void;
 					});
 				}),
 				Effect.asVoid,

@@ -210,18 +210,23 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 		yield* logger.info("Admission control passed, acquired slot", { slotNumber: slot.slotNumber });
 
 		// Build machine request with Redis credentials
+		const env: Record<string, string> = {
+			// Redis credentials for worker
+			UPSTASH_REDIS_REST_URL: config.redisUrl,
+			UPSTASH_REDIS_REST_TOKEN: config.redisToken,
+		};
+
+		// Only set WEBHOOK_URL if provided (optional)
+		if (config.webhookBaseUrl) {
+			env.WEBHOOK_URL = config.webhookBaseUrl;
+		}
+
 		const machineRequest: CreateMachineRequest = {
 			name: `ffmpeg-worker-${Date.now()}`,
 			region: config.flyRegion,
 			config: {
-				image: `registry.fly.io/${config.flyAppName}:latest`,
-				env: {
-					// Redis credentials for worker
-					UPSTASH_REDIS_REST_URL: config.redisUrl,
-					UPSTASH_REDIS_REST_TOKEN: config.redisToken,
-					// Webhook base URL (RPC client constructs full path)
-					WEBHOOK_URL: config.webhookBaseUrl,
-				},
+				image: "registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:deployment-01KDNAQ24NAR64KDV8X49HMHJW",
+				env,
 				guest: {
 					cpu_kind: "shared",
 					cpus: 1,
