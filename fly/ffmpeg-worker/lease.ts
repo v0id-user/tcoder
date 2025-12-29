@@ -134,14 +134,22 @@ export const updateMachineState = (
 				if (data) {
 					try {
 						const parsed = JSON.parse(data);
-						// Preserve actual values from Redis - only use now as fallback if truly missing
-						// Use != null check to handle both null and undefined, but preserve 0 if it exists
-						const parsedLastActiveAt = parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+						// Preserve actual values from Redis - only use now as fallback if truly missing or invalid
+						// Check for null/undefined first, then validate that Number() produces a valid number (not NaN)
+						const parsedLastActiveAt =
+							parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
 						const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
+						// Validate that the numbers are actually valid (not NaN)
+						const lastActiveAt =
+							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
+								? parsedLastActiveAt
+								: now;
+						const createdAt =
+							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now;
 						return {
 							state: parsed.state || "running",
-							lastActiveAt: parsedLastActiveAt ?? now,
-							createdAt: parsedCreatedAt ?? now,
+							lastActiveAt,
+							createdAt,
 							failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 						};
 					} catch {
