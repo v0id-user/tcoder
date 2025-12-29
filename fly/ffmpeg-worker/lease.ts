@@ -134,10 +134,14 @@ export const updateMachineState = (
 				if (data) {
 					try {
 						const parsed = JSON.parse(data);
+						// Preserve actual values from Redis - only use now as fallback if truly missing
+						// Use != null check to handle both null and undefined, but preserve 0 if it exists
+						const parsedLastActiveAt = parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+						const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
 						return {
 							state: parsed.state || "running",
-							lastActiveAt: Number(parsed.lastActiveAt) || now,
-							createdAt: Number(parsed.createdAt) || now,
+							lastActiveAt: parsedLastActiveAt ?? now,
+							createdAt: parsedCreatedAt ?? now,
 							failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 						};
 					} catch {
