@@ -9,34 +9,24 @@
 
 /**
  * Check if we're in dev mode (local development with Docker worker).
- * @param flyApiToken - Optional Fly API token. If not provided, checks process.env.NODE_ENV only.
+ *
+ * Note: In Cloudflare Workers, process.env.NODE_ENV is not reliable and may
+ * be set to "development" even in production. We only check token presence.
+ *
+ * @param flyApiToken - Fly API token. If missing or empty, we're in dev mode.
  * @returns true if in dev mode, false otherwise
  */
 export const isDevMode = (flyApiToken?: string): boolean => {
 	const tokenPresent = flyApiToken !== undefined && flyApiToken !== "";
-	const nodeEnv = process.env.NODE_ENV;
-	const isDevByToken = !tokenPresent;
-	const isDevByNodeEnv = nodeEnv === "development";
+	const isDev = !tokenPresent;
 
 	console.log("[DevMode] Checking dev mode:", {
 		tokenPresent,
 		tokenLength: flyApiToken?.length ?? 0,
-		nodeEnv: nodeEnv ?? "undefined",
-		isDevByToken,
-		isDevByNodeEnv,
-		result: isDevByToken || isDevByNodeEnv,
+		isDev,
+		note: "Only checking token presence (NODE_ENV not reliable in Cloudflare Workers)",
 	});
 
-	// Check if token is missing or empty
-	if (isDevByToken) {
-		return true;
-	}
-
-	// Check if explicitly in development mode
-	if (isDevByNodeEnv) {
-		return true;
-	}
-
-	return false;
+	return isDev;
 };
 
