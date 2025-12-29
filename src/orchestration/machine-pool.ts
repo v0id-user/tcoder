@@ -461,12 +461,22 @@ export const updateMachineState = (
 
 		const createdAt = existingEntry?.createdAt || now;
 
+		// Only update lastActiveAt when machine is doing work (running state)
+		// When transitioning to idle/failed, preserve the existing lastActiveAt
+		// so we can track how long the machine has been idle
+		// If lastActiveAt is missing but entry exists, fall back to createdAt (not now)
+		// to avoid resetting the idle timer
+		const lastActiveAt =
+			state === "running"
+				? now
+				: existingEntry?.lastActiveAt ?? existingEntry?.createdAt ?? now;
+
 		yield* redisEffect((client) =>
 			client.hset(RedisKeys.machinesPool, {
 				[machineId]: serializeMachinePoolEntry({
 					machineId,
 					state,
-					lastActiveAt: now,
+					lastActiveAt,
 					createdAt,
 				}),
 			}),
