@@ -3,6 +3,7 @@ import { Redis } from "@upstash/redis/cloudflare";
 import { Effect } from "effect";
 import { Hono } from "hono";
 import { z } from "zod";
+import { makeLoggerLayer, makeEffectLoggerLayer } from "../../packages/logger";
 import { type SpawnConfig, maybeSpawnWorker } from "../orchestration/spawner";
 import { makeRedisLayer } from "../redis/client";
 import { type JobData, RWOS_CONFIG, RedisKeys, deserializeJobData, serializeJobData } from "../redis/schema";
@@ -46,6 +47,8 @@ const buildJobRoutes = () => {
 				await pipe.exec();
 
 				const redisLayer = makeRedisLayer(c.env);
+				const loggerLayer = makeLoggerLayer({ component: "Jobs", logLevel: "info" });
+				const effectLoggerLayer = makeEffectLoggerLayer("info");
 
 				const spawnConfig: SpawnConfig = {
 					flyApiToken: c.env.FLY_API_TOKEN,
@@ -60,6 +63,8 @@ const buildJobRoutes = () => {
 					maybeSpawnWorker(spawnConfig).pipe(
 						Effect.catchAll(() => Effect.succeed(null)),
 						Effect.provide(redisLayer),
+						Effect.provide(loggerLayer),
+						Effect.provide(effectLoggerLayer),
 					),
 				);
 
@@ -160,10 +165,15 @@ const buildJobRoutes = () => {
 					webhookBaseUrl: c.env.WEBHOOK_BASE_URL,
 				};
 
+				const loggerLayer = makeLoggerLayer({ component: "Jobs", logLevel: "info" });
+				const effectLoggerLayer = makeEffectLoggerLayer("info");
+
 				const spawned = await Effect.runPromise(
 					maybeSpawnWorker(spawnConfig).pipe(
 						Effect.catchAll(() => Effect.succeed(null)),
 						Effect.provide(redisLayer),
+						Effect.provide(loggerLayer),
+						Effect.provide(effectLoggerLayer),
 					),
 				);
 

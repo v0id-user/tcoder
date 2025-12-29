@@ -7,6 +7,7 @@
 
 import { Redis } from "@upstash/redis/cloudflare";
 import { Effect } from "effect";
+import { makeLoggerLayer, makeEffectLoggerLayer, LoggerService } from "../../packages/logger";
 import { type SpawnConfig, maybeSpawnWorker } from "../orchestration/spawner";
 import { makeRedisLayer } from "../redis/client";
 import { type JobData, RWOS_CONFIG, RedisKeys, serializeJobData } from "../redis/schema";
@@ -72,33 +73,60 @@ export interface Env {
  */
 export async function handleR2Events(batch: MessageBatch<R2EventNotification>, env: Env): Promise<void> {
 	const redis = Redis.fromEnv(env);
+	const loggerLayer = makeLoggerLayer({ component: "R2Events", logLevel: "info" });
+	const effectLoggerLayer = makeEffectLoggerLayer("info");
 
-	console.log(`[R2 Events] Processing ${batch.messages.length} events`);
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const logger = yield* LoggerService;
+			yield* logger.info("Processing R2 event batch", { messageCount: batch.messages.length });
+		}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+	);
 
 	for (const message of batch.messages) {
 		const event = message.body;
 
 		// Only process object creation events
 		if (event.action !== "PutObject" && event.action !== "CompleteMultipartUpload") {
-			console.log(`[R2 Events] Skipping ${event.action} event`);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.info("Skipping non-creation event", { action: event.action });
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 			message.ack();
 			continue;
 		}
 
 		// Only process events from input bucket
 		if (event.bucket !== env.R2_INPUT_BUCKET_NAME) {
-			console.log(`[R2 Events] Skipping event from bucket: ${event.bucket}`);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.info("Skipping event from wrong bucket", { bucket: event.bucket, expectedBucket: env.R2_INPUT_BUCKET_NAME });
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 			message.ack();
 			continue;
 		}
 
 		const objectKey = event.object.key;
-		console.log(`[R2 Events] Processing upload: ${objectKey}`);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.info("Processing upload event", { objectKey, size: event.object.size });
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 
 		// Extract job ID from object key (format: inputs/{jobId}/filename)
 		const jobId = extractJobIdFromKey(objectKey);
 		if (!jobId) {
-			console.log(`[R2 Events] Could not extract job ID from key: ${objectKey}`);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.warn("Could not extract job ID from key", { objectKey });
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 			message.ack();
 			continue;
 		}
@@ -108,17 +136,33 @@ export async function handleR2Events(batch: MessageBatch<R2EventNotification>, e
 			const jobData = await redis.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId));
 
 			if (!jobData || Object.keys(jobData).length === 0) {
-				console.log(`[R2 Events] Job ${jobId} not found, creating new job`);
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const logger = yield* LoggerService;
+						yield* logger.info("Job not found, creating new job", { jobId });
+					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+				);
 				// Create a new job if it doesn't exist
 				await createJobFromEvent(redis, env, jobId, event);
 			} else {
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const logger = yield* LoggerService;
+						yield* logger.info("Job exists, updating from event", { jobId });
+					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+				);
 				// Update existing job
 				await updateJobFromEvent(redis, env, jobId, jobData, event);
 			}
 
 			message.ack();
 		} catch (error) {
-			console.error(`[R2 Events] Error processing job ${jobId}:`, error);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.error("Error processing job", error, { jobId });
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 			message.retry();
 		}
 	}
@@ -131,6 +175,8 @@ type RedisClient = ReturnType<typeof Redis.fromEnv>;
  * Create a new job from R2 event (for direct uploads without presigned URL)
  */
 async function createJobFromEvent(redis: RedisClient, env: Env, jobId: string, event: R2EventNotification): Promise<void> {
+	const loggerLayer = makeLoggerLayer({ component: "R2Events", logLevel: "info" });
+	const effectLoggerLayer = makeEffectLoggerLayer("info");
 	const now = Date.now();
 
 	const jobData: JobData = {
@@ -156,7 +202,12 @@ async function createJobFromEvent(redis: RedisClient, env: Env, jobId: string, e
 	pipe.zadd(RedisKeys.jobsPending, { score: now, member: jobId });
 	await pipe.exec();
 
-	console.log(`[R2 Events] Created and enqueued job ${jobId}`);
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const logger = yield* LoggerService;
+			yield* logger.info("Created and enqueued job", { jobId, inputKey: event.object.key });
+		}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+	);
 
 	// Try to spawn a worker
 	await trySpawnWorker(env);
@@ -172,6 +223,8 @@ async function updateJobFromEvent(
 	_existingData: Record<string, string>,
 	event: R2EventNotification,
 ): Promise<void> {
+	const loggerLayer = makeLoggerLayer({ component: "R2Events", logLevel: "info" });
+	const effectLoggerLayer = makeEffectLoggerLayer("info");
 	const now = Date.now();
 
 	// Update job status to pending (ready for processing)
@@ -188,7 +241,12 @@ async function updateJobFromEvent(
 	pipe.zadd(RedisKeys.jobsPending, { score: now, member: jobId });
 	await pipe.exec();
 
-	console.log(`[R2 Events] Updated and enqueued job ${jobId}`);
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const logger = yield* LoggerService;
+			yield* logger.info("Updated and enqueued job", { jobId, inputKey: event.object.key });
+		}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+	);
 
 	// Try to spawn a worker
 	await trySpawnWorker(env);
@@ -206,11 +264,18 @@ export interface RecoveryEnv extends Env {
  * Checks if file exists in R2 and transitions job to "pending" if found.
  */
 export async function recoverUploadingJob(redis: RedisClient, env: RecoveryEnv, jobId: string, inputKey: string): Promise<boolean> {
+	const loggerLayer = makeLoggerLayer({ component: "Recovery", logLevel: "info" });
+	const effectLoggerLayer = makeEffectLoggerLayer("info");
 	try {
 		// Check if file exists in R2
 		const object = await env.INPUT_BUCKET.head(inputKey);
 		if (!object) {
-			// File doesn't exist yet
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.info("File not found in R2, cannot recover", { jobId, inputKey });
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 			return false;
 		}
 
@@ -219,13 +284,23 @@ export async function recoverUploadingJob(redis: RedisClient, env: RecoveryEnv, 
 		// Get existing job data to preserve fields
 		const existingData = await redis.hgetall<Record<string, string>>(RedisKeys.jobStatus(jobId));
 		if (!existingData || Object.keys(existingData).length === 0) {
-			console.log(`[Recovery] Job ${jobId} not found in Redis`);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.warn("Job not found in Redis", { jobId });
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 			return false;
 		}
 
 		// Check if job is still in "uploading" status (avoid race conditions)
 		if (existingData.status !== "uploading") {
-			console.log(`[Recovery] Job ${jobId} already transitioned to ${existingData.status}`);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.info("Job already transitioned, skipping recovery", { jobId, currentStatus: existingData.status });
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 			return false;
 		}
 
@@ -246,14 +321,24 @@ export async function recoverUploadingJob(redis: RedisClient, env: RecoveryEnv, 
 		pipe.zadd(RedisKeys.jobsPending, { score: now, member: jobId });
 		await pipe.exec();
 
-		console.log(`[Recovery] Recovered and enqueued job ${jobId} (file found in R2)`);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.info("Recovered and enqueued job (file found in R2)", { jobId, inputKey });
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 
 		// Try to spawn a worker
 		await trySpawnWorker(env);
 
 		return true;
 	} catch (error) {
-		console.error(`[Recovery] Error recovering job ${jobId}:`, error);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.error("Error recovering job", error, { jobId, inputKey });
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 		return false;
 	}
 }
@@ -262,11 +347,20 @@ export async function recoverUploadingJob(redis: RedisClient, env: RecoveryEnv, 
  * Attempt to spawn a worker if capacity is available
  */
 async function trySpawnWorker(env: Env): Promise<void> {
+	const loggerLayer = makeLoggerLayer({ component: "R2Events", logLevel: "info" });
+	const effectLoggerLayer = makeEffectLoggerLayer("info");
 	try {
 		const redisLayer = makeRedisLayer({
 			UPSTASH_REDIS_REST_URL: env.UPSTASH_REDIS_REST_URL,
 			UPSTASH_REDIS_REST_TOKEN: env.UPSTASH_REDIS_REST_TOKEN,
 		});
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.info("Attempting to spawn worker", { appName: env.FLY_APP_NAME, region: env.FLY_REGION });
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 
 		const spawnConfig: SpawnConfig = {
 			flyApiToken: env.FLY_API_TOKEN,
@@ -279,15 +373,41 @@ async function trySpawnWorker(env: Env): Promise<void> {
 
 		const result = await Effect.runPromise(
 			maybeSpawnWorker(spawnConfig).pipe(
-				Effect.catchAll(() => Effect.succeed(null)),
+				Effect.catchAll((err) =>
+					Effect.gen(function* () {
+						const logger = yield* LoggerService;
+						if (err._tag === "CapacityFull") {
+							yield* logger.warn("Spawn worker failed: capacity full", {
+								reason: err.reason,
+							});
+						} else {
+							yield* logger.error("Spawn worker failed", err, {
+								errorType: err._tag,
+							});
+						}
+						return null;
+					}),
+				),
 				Effect.provide(redisLayer),
+				Effect.provide(loggerLayer),
+				Effect.provide(effectLoggerLayer),
 			),
 		);
 
 		if (result) {
-			console.log(`[R2 Events] Spawned worker: ${result.machineId}`);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.info("Worker spawned successfully", { machineId: result.machineId, state: result.state });
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 		}
 	} catch (error) {
-		console.error("[R2 Events] Failed to spawn worker:", error);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.error("Failed to spawn worker", error);
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 	}
 }

@@ -6,6 +6,7 @@
  */
 
 import { Effect } from "effect";
+import { LoggerService } from "../../packages/logger";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
 import { type JobData, type JobOutput, RWOS_CONFIG, RedisKeys, deserializeJobData, serializeJobData } from "../redis/schema";
 
@@ -29,10 +30,13 @@ export const enqueueJob = (
 	job: Omit<JobData, "status" | "timestamps" | "retries"> & {
 		timestamps?: Partial<JobData["timestamps"]>;
 	},
-): Effect.Effect<JobData, RedisError, RedisService> =>
+): Effect.Effect<JobData, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 		const now = Date.now();
+
+		yield* logger.info("Enqueueing job", { jobId: job.jobId, inputKey: job.inputKey });
 
 		const fullJob: JobData = {
 			...job,
@@ -60,17 +64,28 @@ export const enqueueJob = (
 				_tag: "CommandError" as const,
 				reason: e instanceof Error ? e.message : String(e),
 			}),
-		});
+		}).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Redis error enqueueing job", err, { jobId: job.jobId });
+					return yield* Effect.fail(err);
+				}),
+			),
+		);
 
+		yield* logger.info("Job enqueued successfully", { jobId: job.jobId });
 		return fullJob;
 	});
 
 /**
  * Atomically pop a job from the queue and mark it as running.
  */
-export const popJob = (machineId: string): Effect.Effect<JobData | null, JobManagerError, RedisService> =>
+export const popJob = (machineId: string): Effect.Effect<JobData | null, JobManagerError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
+
+		yield* logger.info("Attempting to pop job from queue", { machineId });
 
 		const popped = yield* Effect.tryPromise({
 			try: () => client.zpopmin<string>(RedisKeys.jobsPending, 1),
@@ -81,6 +96,7 @@ export const popJob = (machineId: string): Effect.Effect<JobData | null, JobMana
 		});
 
 		if (!popped || popped.length === 0) {
+			yield* logger.info("No jobs available in queue", { machineId });
 			return null;
 		}
 
@@ -113,11 +129,18 @@ export const popJob = (machineId: string): Effect.Effect<JobData | null, JobMana
 
 		const job = deserializeJobData(jobData);
 		if (!job) {
+			yield* logger.error("Failed to deserialize job data", undefined, { jobId, machineId });
 			return yield* Effect.fail({
 				_tag: "InvalidJobData" as const,
 				reason: `Failed to deserialize job ${jobId}`,
 			});
 		}
+
+		yield* logger.info("Job popped and marked as running", {
+			jobId,
+			machineId,
+			inputKey: job.inputKey,
+		});
 
 		return {
 			...job,
@@ -136,38 +159,66 @@ export const popJob = (machineId: string): Effect.Effect<JobData | null, JobMana
 export const completeJob = (
 	jobId: string,
 	result?: { outputs?: JobOutput[]; duration?: number },
-): Effect.Effect<void, RedisError, RedisService> =>
-	redisEffect(async (client) => {
-		const pipe = client.pipeline();
-		pipe.hset(RedisKeys.jobStatus(jobId), {
-			status: "completed",
-			completedAt: String(Date.now()),
-			...(result?.outputs && { outputs: JSON.stringify(result.outputs) }),
-			...(result?.duration && { duration: String(result.duration) }),
+): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
+	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		yield* logger.info("Marking job as completed", {
+			jobId,
+			outputCount: result?.outputs?.length,
+			duration: result?.duration,
 		});
-		pipe.hdel(RedisKeys.jobsActive, jobId);
-		await pipe.exec();
+
+		yield* redisEffect(async (client) => {
+			const pipe = client.pipeline();
+			pipe.hset(RedisKeys.jobStatus(jobId), {
+				status: "completed",
+				completedAt: String(Date.now()),
+				...(result?.outputs && { outputs: JSON.stringify(result.outputs) }),
+				...(result?.duration && { duration: String(result.duration) }),
+			});
+			pipe.hdel(RedisKeys.jobsActive, jobId);
+			await pipe.exec();
+		}).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Redis error completing job", err, { jobId });
+					return yield* Effect.fail(err);
+				}),
+			),
+		);
 	});
 
 /**
  * Mark a job as failed.
  */
-export const failJob = (jobId: string, error: string): Effect.Effect<void, RedisError, RedisService> =>
-	redisEffect(async (client) => {
-		const pipe = client.pipeline();
-		pipe.hset(RedisKeys.jobStatus(jobId), {
-			status: "failed",
-			completedAt: String(Date.now()),
-			error,
-		});
-		pipe.hdel(RedisKeys.jobsActive, jobId);
-		await pipe.exec();
+export const failJob = (jobId: string, error: string): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
+	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		yield* logger.error("Marking job as failed", error, { jobId });
+
+		yield* redisEffect(async (client) => {
+			const pipe = client.pipeline();
+			pipe.hset(RedisKeys.jobStatus(jobId), {
+				status: "failed",
+				completedAt: String(Date.now()),
+				error,
+			});
+			pipe.hdel(RedisKeys.jobsActive, jobId);
+			await pipe.exec();
+		}).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Redis error failing job", err, { jobId });
+					return yield* Effect.fail(err);
+				}),
+			),
+		);
 	});
 
 /**
  * Requeue a job (for retry after failure).
  */
-export const requeueJob = (jobId: string): Effect.Effect<boolean, JobManagerError, RedisService> =>
+export const requeueJob = (jobId: string): Effect.Effect<boolean, JobManagerError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
 		const { client } = yield* RedisService;
 

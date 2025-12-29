@@ -5,9 +5,10 @@
  * Machines are pooled: stopped machines can be restarted instead of creating new ones.
  */
 
-import { Console, Effect } from "effect";
+import { Effect } from "effect";
 import { flyClient } from "../../fly/fly-client";
 import type { Machine } from "../../fly/fly-machine-apis";
+import { LoggerService } from "../../packages/logger";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
 import { RWOS_CONFIG, RedisKeys, deserializeMachinePoolEntry, serializeMachinePoolEntry } from "../redis/schema";
 
@@ -63,9 +64,10 @@ const callFlyApi = <T>(operation: (config: FlyConfig) => Promise<T>, config: Fly
 /**
  * Start a stopped machine via Fly API.
  */
-export const startMachine = (machineId: string, config: FlyConfig): Effect.Effect<void, FlyApiError, RedisService> =>
+export const startMachine = (machineId: string, config: FlyConfig): Effect.Effect<void, FlyApiError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
-		yield* Console.log(`[MachinePool] Starting machine ${machineId}`);
+		const logger = yield* LoggerService;
+		yield* logger.info("Starting machine", { machineId, appName: config.appName });
 
 		// Call Fly API to start machine
 		yield* callFlyApi(async (cfg) => {
@@ -81,7 +83,18 @@ export const startMachine = (machineId: string, config: FlyConfig): Effect.Effec
 					},
 				},
 			);
-		}, config);
+		}, config).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Fly API error starting machine", err, {
+						machineId,
+						status: err._tag === "HttpError" ? err.status : undefined,
+						body: err._tag === "HttpError" ? err.body : undefined,
+					});
+					return yield* Effect.fail(err);
+				}),
+			),
+		);
 
 		// Update pool state: remove from stopped set, update pool entry to running
 		const { client } = yield* RedisService;
@@ -123,17 +136,25 @@ export const startMachine = (machineId: string, config: FlyConfig): Effect.Effec
 				_tag: "CommandError" as const,
 				reason: e instanceof Error ? e.message : String(e),
 			}),
-		});
+		}).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Redis error updating pool state after start", err, { machineId });
+					return yield* Effect.fail(err);
+				}),
+			),
+		);
 
-		yield* Console.log(`[MachinePool] Machine ${machineId} started and marked as running`);
+		yield* logger.info("Machine started and marked as running", { machineId });
 	});
 
 /**
  * Stop a running machine via Fly API.
  */
-export const stopMachine = (machineId: string, config: FlyConfig): Effect.Effect<void, FlyApiError, RedisService> =>
+export const stopMachine = (machineId: string, config: FlyConfig): Effect.Effect<void, FlyApiError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
-		yield* Console.log(`[MachinePool] Stopping machine ${machineId}`);
+		const logger = yield* LoggerService;
+		yield* logger.info("Stopping machine", { machineId, appName: config.appName });
 
 		// Call Fly API to stop machine
 		yield* callFlyApi(async (cfg) => {
@@ -149,7 +170,18 @@ export const stopMachine = (machineId: string, config: FlyConfig): Effect.Effect
 					},
 				},
 			);
-		}, config);
+		}, config).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Fly API error stopping machine", err, {
+						machineId,
+						status: err._tag === "HttpError" ? err.status : undefined,
+						body: err._tag === "HttpError" ? err.body : undefined,
+					});
+					return yield* Effect.fail(err);
+				}),
+			),
+		);
 
 		// Update pool state: add to stopped set, update pool entry to stopped
 		const { client } = yield* RedisService;
@@ -191,18 +223,26 @@ export const stopMachine = (machineId: string, config: FlyConfig): Effect.Effect
 				_tag: "CommandError" as const,
 				reason: e instanceof Error ? e.message : String(e),
 			}),
-		});
+		}).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Redis error updating pool state after stop", err, { machineId });
+					return yield* Effect.fail(err);
+				}),
+			),
+		);
 
-		yield* Console.log(`[MachinePool] Machine ${machineId} stopped and added to stopped set`);
+		yield* logger.info("Machine stopped and added to stopped set", { machineId });
 	});
 
 /**
  * Sync machine pool state with Fly API.
  * Called on startup/recovery to ensure Redis matches actual Fly machine states.
  */
-export const syncMachinePool = (config: FlyConfig): Effect.Effect<void, FlyApiError, RedisService> =>
+export const syncMachinePool = (config: FlyConfig): Effect.Effect<void, FlyApiError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
-		yield* Console.log("[MachinePool] Syncing pool state with Fly API...");
+		const logger = yield* LoggerService;
+		yield* logger.info("Syncing pool state with Fly API", { appName: config.appName });
 
 		// Get all machines from Fly API
 		const machines = yield* callFlyApi(async (cfg) => {
@@ -218,9 +258,19 @@ export const syncMachinePool = (config: FlyConfig): Effect.Effect<void, FlyApiEr
 				},
 			);
 			return (response.data as { machines?: Machine[] })?.machines || [];
-		}, config);
+		}, config).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Fly API error listing machines", err, {
+						status: err._tag === "HttpError" ? err.status : undefined,
+						body: err._tag === "HttpError" ? err.body : undefined,
+					});
+					return yield* Effect.fail(err);
+				}),
+			),
+		);
 
-		yield* Console.log(`[MachinePool] Found ${machines.length} machines in Fly`);
+		yield* logger.info("Found machines in Fly", { count: machines.length });
 
 		const { client } = yield* RedisService;
 		const now = Date.now();
@@ -306,18 +356,26 @@ export const syncMachinePool = (config: FlyConfig): Effect.Effect<void, FlyApiEr
 					_tag: "CommandError" as const,
 					reason: e instanceof Error ? e.message : String(e),
 				}),
-			});
+			}).pipe(
+				Effect.catchAll((err) =>
+					Effect.gen(function* () {
+						yield* logger.error("Redis error syncing pool entries", err, { updated });
+						return yield* Effect.fail(err);
+					}),
+				),
+			);
 		}
 
-		yield* Console.log(`[MachinePool] Synced ${updated} pool entries`);
+		yield* logger.info("Pool sync completed", { updated });
 	});
 
 /**
  * Get a stopped machine ID from the pool (pops from set).
  * Returns null if no stopped machines available.
  */
-export const popStoppedMachine = (): Effect.Effect<string | null, RedisError, RedisService> =>
+export const popStoppedMachine = (): Effect.Effect<string | null, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 
 		// Use SPOP to atomically get and remove one machine from stopped set
@@ -336,14 +394,21 @@ export const popStoppedMachine = (): Effect.Effect<string | null, RedisError, Re
 			}),
 		});
 
+		if (machineId) {
+			yield* logger.info("Popped stopped machine from pool", { machineId });
+		} else {
+			yield* logger.info("No stopped machines available in pool");
+		}
+
 		return machineId;
 	});
 
 /**
  * Add a new machine to the pool.
  */
-export const addMachineToPool = (machineId: string): Effect.Effect<void, RedisError, RedisService> =>
+export const addMachineToPool = (machineId: string): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 		const now = Date.now();
 
@@ -356,9 +421,16 @@ export const addMachineToPool = (machineId: string): Effect.Effect<void, RedisEr
 					createdAt: now,
 				}),
 			}),
+		).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Redis error adding machine to pool", err, { machineId });
+					return yield* Effect.fail(err);
+				}),
+			),
 		);
 
-		yield* Console.log(`[MachinePool] Added machine ${machineId} to pool`);
+		yield* logger.info("Added machine to pool", { machineId });
 	});
 
 /**

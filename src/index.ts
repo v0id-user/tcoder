@@ -11,6 +11,7 @@
 import { Redis } from "@upstash/redis/cloudflare";
 import { Effect } from "effect";
 import { Hono } from "hono";
+import { makeLoggerLayer, makeEffectLoggerLayer, LoggerService } from "../packages/logger";
 import { createRoutes, createWebhookRoutes } from "./api/routes";
 import { stopMachine } from "./orchestration/machine-pool";
 import { type MessageBatch, type R2EventNotification, type RecoveryEnv, handleR2Events, recoverUploadingJob } from "./r2/events";
@@ -58,13 +59,26 @@ export default {
 
 async function handleScheduled(env: Env) {
 	const redis = Redis.fromEnv(env);
-	console.log("[Cron] Checking for idle machines to stop...");
+	const loggerLayer = makeLoggerLayer({ component: "Cron", logLevel: "info" });
+	const effectLoggerLayer = makeEffectLoggerLayer("info");
+
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const logger = yield* LoggerService;
+			yield* logger.info("Checking for idle machines to stop");
+		}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+	);
 
 	try {
 		// Get all machines from pool
 		const poolEntries = await redis.hgetall<Record<string, string>>(RedisKeys.machinesPool);
 		if (!poolEntries || Object.keys(poolEntries).length === 0) {
-			console.log("[Cron] No machines in pool");
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.info("No machines in pool");
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 			await recoverStuckUploadingJobs(env);
 			return;
 		}
@@ -85,12 +99,22 @@ async function handleScheduled(env: Env) {
 		}
 
 		if (machinesToStop.length === 0) {
-			console.log("[Cron] No idle machines to stop");
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.info("No idle machines to stop");
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 			await recoverStuckUploadingJobs(env);
 			return;
 		}
 
-		console.log(`[Cron] Found ${machinesToStop.length} idle machines to stop`);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.info("Found idle machines to stop", { count: machinesToStop.length, machineIds: machinesToStop });
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 
 		// Stop each idle machine using Effect
 		const redisLayer = makeRedisLayer({
@@ -106,23 +130,49 @@ async function handleScheduled(env: Env) {
 		let stoppedCount = 0;
 		for (const machineId of machinesToStop) {
 			try {
-				await Effect.runPromise(stopMachine(machineId, flyConfig).pipe(Effect.provide(redisLayer)));
+				await Effect.runPromise(
+					stopMachine(machineId, flyConfig).pipe(
+						Effect.provide(redisLayer),
+						Effect.provide(loggerLayer),
+						Effect.provide(effectLoggerLayer),
+					),
+				);
 				stoppedCount++;
 			} catch (e) {
-				console.error(`[Cron] Failed to stop machine ${machineId}:`, e);
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const logger = yield* LoggerService;
+						yield* logger.error("Failed to stop machine", e, { machineId });
+					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+				);
 			}
 		}
 
-		console.log(`[Cron] Stopped ${stoppedCount}/${machinesToStop.length} idle machines`);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.info("Stopped idle machines", { stoppedCount, total: machinesToStop.length });
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 	} catch (e) {
-		console.error("[Cron] Error stopping idle machines:", e);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.error("Error stopping idle machines", e);
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 	}
 
 	// Recover stuck uploading jobs
 	try {
 		await recoverStuckUploadingJobs(env);
 	} catch (e) {
-		console.error("[Cron] Error recovering uploading jobs:", e);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.error("Error recovering uploading jobs", e);
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 	}
 }
 
@@ -132,12 +182,19 @@ async function handleScheduled(env: Env) {
  */
 async function recoverStuckUploadingJobs(env: Env) {
 	const redis = Redis.fromEnv(env);
+	const loggerLayer = makeLoggerLayer({ component: "Cron", logLevel: "info" });
+	const effectLoggerLayer = makeEffectLoggerLayer("info");
 	const now = Date.now();
 
 	// Calculate recovery threshold: presigned URL expiry + buffer
 	const recoveryThresholdMs = (RWOS_CONFIG.PRESIGNED_URL_EXPIRY_SECONDS + RWOS_CONFIG.UPLOADING_RECOVERY_BUFFER_SECONDS) * 1000;
 
-	console.log("[Cron] Checking for stuck uploading jobs...");
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const logger = yield* LoggerService;
+			yield* logger.info("Checking for stuck uploading jobs", { recoveryThresholdMs });
+		}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+	);
 
 	// Try to find uploading jobs by scanning job status keys
 	// Note: This is a best-effort approach. For production, consider maintaining a SET of uploading job IDs.
@@ -161,7 +218,12 @@ async function recoverStuckUploadingJobs(env: Env) {
 
 			for (const key of keys) {
 				if (checkedCount >= maxChecks) {
-					console.log(`[Cron] Reached max checks limit (${maxChecks}), stopping scan`);
+					await Effect.runPromise(
+						Effect.gen(function* () {
+							const logger = yield* LoggerService;
+							yield* logger.info("Reached max checks limit, stopping scan", { maxChecks });
+						}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+					);
 					break;
 				}
 
@@ -190,7 +252,12 @@ async function recoverStuckUploadingJobs(env: Env) {
 
 				// Check if file exists and recover
 				if (!job.inputKey) {
-					console.log(`[Cron] Job ${jobId} has no inputKey, marking as failed`);
+					await Effect.runPromise(
+						Effect.gen(function* () {
+							const logger = yield* LoggerService;
+							yield* logger.warn("Job has no inputKey, marking as failed", { jobId });
+						}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+					);
 					await redis.hset(key, {
 						status: "failed",
 						error: "Upload never completed (no input key)",
@@ -214,7 +281,16 @@ async function recoverStuckUploadingJobs(env: Env) {
 					// File doesn't exist - check if job is very old (presumed failed upload)
 					const veryOldThreshold = recoveryThresholdMs * 2; // 2x the recovery threshold
 					if (jobAge > veryOldThreshold) {
-						console.log(`[Cron] Job ${jobId} is very old (${Math.round(jobAge / 1000)}s) and file not found, marking as failed`);
+						await Effect.runPromise(
+							Effect.gen(function* () {
+								const logger = yield* LoggerService;
+								yield* logger.warn("Job is very old and file not found, marking as failed", {
+									jobId,
+									jobAgeSeconds: Math.round(jobAge / 1000),
+									veryOldThresholdSeconds: Math.round(veryOldThreshold / 1000),
+								});
+							}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+						);
 						await redis.hset(key, {
 							status: "failed",
 							error: "Upload never completed (file not found after extended wait)",
@@ -229,11 +305,27 @@ async function recoverStuckUploadingJobs(env: Env) {
 		} while (cursor !== 0 && cursor !== "0");
 
 		if (checkedCount > 0) {
-			console.log(`[Cron] Checked ${checkedCount} jobs, recovered ${recoveredCount} stuck uploading jobs, failed ${failedCount} old jobs`);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.info("Recovery scan completed", {
+						checkedCount,
+						recoveredCount,
+						failedCount,
+					});
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 		}
 	} catch (error) {
 		// SCAN might not be available or might fail - log and continue
-		console.log(`[Cron] Could not scan for uploading jobs (this is okay): ${error instanceof Error ? error.message : String(error)}`);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.info("Could not scan for uploading jobs (this is okay)", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
 	}
 }
 

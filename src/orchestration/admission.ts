@@ -6,6 +6,7 @@
  */
 
 import { Effect } from "effect";
+import { LoggerService } from "../../packages/logger";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
 import { RWOS_CONFIG, RedisKeys, deserializeMachinePoolEntry } from "../redis/schema";
 
@@ -26,8 +27,9 @@ export type AdmissionError =
  * Check rate limit for Fly API calls (1 req/sec).
  * Returns true if allowed, false if rate limited.
  */
-export const checkRateLimit = (): Effect.Effect<boolean, RedisError, RedisService> =>
+export const checkRateLimit = (): Effect.Effect<boolean, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 
 		// INCR with 1 second expiry
@@ -45,13 +47,15 @@ export const checkRateLimit = (): Effect.Effect<boolean, RedisError, RedisServic
 			}),
 		});
 
-		return count <= 1;
+		const allowed = count <= 1;
+		yield* logger.info("Rate limit check", { count, allowed });
+		return allowed;
 	});
 
 /**
  * Wait for rate limit slot (blocking with retry).
  */
-export const waitForRateLimit = (): Effect.Effect<void, RedisError, RedisService> =>
+export const waitForRateLimit = (): Effect.Effect<void, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
 		let allowed = yield* checkRateLimit();
 
@@ -65,13 +69,20 @@ export const waitForRateLimit = (): Effect.Effect<void, RedisError, RedisService
  * Check if we have capacity to create a new machine.
  * Counts all machines in pool (running + stopped) vs MAX_MACHINES.
  */
-export const checkCapacity = (): Effect.Effect<{ allowed: boolean; currentMachines: number }, RedisError, RedisService> =>
+export const checkCapacity = (): Effect.Effect<{ allowed: boolean; currentMachines: number }, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		// Count machines in pool (running + stopped)
 		const poolEntries = yield* redisEffect((client) => client.hgetall<Record<string, string>>(RedisKeys.machinesPool));
 
 		const currentMachines = poolEntries ? Object.keys(poolEntries).length : 0;
 		const allowed = currentMachines < RWOS_CONFIG.MAX_MACHINES;
+
+		yield* logger.info("Capacity check", {
+			currentMachines,
+			maxMachines: RWOS_CONFIG.MAX_MACHINES,
+			allowed,
+		});
 
 		return { allowed, currentMachines };
 	});
@@ -79,14 +90,20 @@ export const checkCapacity = (): Effect.Effect<{ allowed: boolean; currentMachin
 /**
  * Reserve a machine slot (increment counter).
  */
-export const reserveMachineSlot = (): Effect.Effect<number, RedisError, RedisService> =>
-	redisEffect((client) => client.incr(RedisKeys.countersActiveMachines));
+export const reserveMachineSlot = (): Effect.Effect<number, RedisError, RedisService | LoggerService> =>
+	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		const slotNumber = yield* redisEffect((client) => client.incr(RedisKeys.countersActiveMachines));
+		yield* logger.info("Machine slot reserved", { slotNumber });
+		return slotNumber;
+	});
 
 /**
  * Release a machine slot (decrement counter).
  */
-export const releaseMachineSlot = (): Effect.Effect<number, RedisError, RedisService> =>
+export const releaseMachineSlot = (): Effect.Effect<number, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
 		const { client } = yield* RedisService;
 
 		// Decrement but ensure it doesn't go below 0
@@ -105,6 +122,7 @@ export const releaseMachineSlot = (): Effect.Effect<number, RedisError, RedisSer
 			}),
 		});
 
+		yield* logger.info("Machine slot released", { remainingCount: count });
 		return count;
 	});
 
@@ -112,7 +130,7 @@ export const releaseMachineSlot = (): Effect.Effect<number, RedisError, RedisSer
  * Full admission check: capacity only (Fly handles rate limiting with 429s).
  * Returns true if a machine can be created.
  */
-export const canCreateMachine = (): Effect.Effect<{ allowed: boolean; reason?: string }, RedisError, RedisService> =>
+export const canCreateMachine = (): Effect.Effect<{ allowed: boolean; reason?: string }, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
 		// Check capacity (pool-based: running + stopped)
 		const { allowed, currentMachines } = yield* checkCapacity();
@@ -133,15 +151,23 @@ export const canCreateMachine = (): Effect.Effect<{ allowed: boolean; reason?: s
 export const acquireMachineSlot = (): Effect.Effect<
 	{ acquired: boolean; slotNumber?: number; reason?: string },
 	RedisError,
-	RedisService
+	RedisService | LoggerService
 > =>
 	Effect.gen(function* () {
+		const logger = yield* LoggerService;
+		yield* logger.info("Attempting to acquire machine slot");
+
 		// Check capacity (pool-based: running + stopped)
 		const { allowed, currentMachines } = yield* checkCapacity();
 		if (!allowed) {
+			const reason = `Capacity full (${currentMachines}/${RWOS_CONFIG.MAX_MACHINES})`;
+			yield* logger.warn("Admission control: capacity full", {
+				currentMachines,
+				maxMachines: RWOS_CONFIG.MAX_MACHINES,
+			});
 			return {
 				acquired: false,
-				reason: `Capacity full (${currentMachines}/${RWOS_CONFIG.MAX_MACHINES})`,
+				reason,
 			};
 		}
 
@@ -150,8 +176,13 @@ export const acquireMachineSlot = (): Effect.Effect<
 
 		// Double-check we didn't exceed limit (race condition protection)
 		// Note: This uses the counter, but actual capacity is pool-based
-		const { allowed: stillAllowed } = yield* checkCapacity();
+		const { allowed: stillAllowed, currentMachines: newCurrentMachines } = yield* checkCapacity();
 		if (!stillAllowed) {
+			yield* logger.warn("Capacity exceeded after reservation (race condition)", {
+				currentMachines: newCurrentMachines,
+				maxMachines: RWOS_CONFIG.MAX_MACHINES,
+				slotNumber,
+			});
 			yield* releaseMachineSlot();
 			return {
 				acquired: false,
@@ -159,6 +190,7 @@ export const acquireMachineSlot = (): Effect.Effect<
 			};
 		}
 
+		yield* logger.info("Machine slot acquired successfully", { slotNumber });
 		return { acquired: true, slotNumber };
 	});
 
