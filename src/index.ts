@@ -187,6 +187,7 @@ async function handleScheduled(env: Env) {
 		};
 
 		let stoppedCount = 0;
+		let cleanedCount = 0;
 		for (const machineId of machinesToStop) {
 			try {
 				await Effect.runPromise(
@@ -198,19 +199,50 @@ async function handleScheduled(env: Env) {
 				);
 				stoppedCount++;
 			} catch (e) {
-				await Effect.runPromise(
-					Effect.gen(function* () {
-						const logger = yield* LoggerService;
-						yield* logger.error("Failed to stop machine", e, { machineId });
-					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
-				);
+				// Check if error is 404 (machine not found) - clean up stale Redis entry
+				const is404 =
+					e &&
+					typeof e === "object" &&
+					"_tag" in e &&
+					e._tag === "HttpError" &&
+					"status" in e &&
+					e.status === 404;
+
+				if (is404) {
+					// Machine doesn't exist in Fly, clean up stale Redis entry
+					await Effect.runPromise(
+						Effect.gen(function* () {
+							const logger = yield* LoggerService;
+							yield* logger.info("Machine not found in Fly, cleaning up stale Redis entry", { machineId });
+						}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+					);
+
+					// Remove from pool and stopped set using direct Redis client
+					const pipe = redis.pipeline();
+					pipe.hdel(RedisKeys.machinesPool, machineId);
+					pipe.srem(RedisKeys.machinesStopped, machineId);
+					await pipe.exec();
+
+					cleanedCount++;
+				} else {
+					await Effect.runPromise(
+						Effect.gen(function* () {
+							const logger = yield* LoggerService;
+							yield* logger.error("Failed to stop machine", e, { machineId });
+						}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+					);
+				}
 			}
 		}
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const logger = yield* LoggerService;
-				yield* logger.info("Stopped idle machines", { stoppedCount, total: machinesToStop.length });
+				yield* logger.info("Stopped idle machines", {
+					stoppedCount,
+					cleanedCount,
+					total: machinesToStop.length,
+				});
 			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 		);
 	} catch (e) {

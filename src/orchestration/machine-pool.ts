@@ -318,14 +318,23 @@ export const syncMachinePool = (config: FlyConfig): Effect.Effect<void, FlyApiEr
 			const createdAt = existingEntry?.createdAt || now;
 			const flyState = machine.state || "unknown";
 
-			// Determine state: if Fly says stopped, mark as stopped; otherwise running
-			const poolState = flyState === "stopped" ? "stopped" : "running";
+			// Determine state: if Fly says stopped, mark as stopped
+			// Otherwise preserve the state from Redis (idle/running/failed) since the worker knows best
+			// Only default to "running" if there's no existing entry
+			const poolState =
+				flyState === "stopped"
+					? "stopped"
+					: existingEntry?.state || "running";
+
+			// Preserve lastActiveAt - only update if missing, fall back to createdAt (not now)
+			// to avoid resetting the idle timer
+			const lastActiveAt = existingEntry?.lastActiveAt ?? existingEntry?.createdAt ?? now;
 
 			pipe.hset(RedisKeys.machinesPool, {
 				[machineId]: serializeMachinePoolEntry({
 					machineId,
 					state: poolState,
-					lastActiveAt: existingEntry?.lastActiveAt || now,
+					lastActiveAt,
 					createdAt,
 				}),
 			});

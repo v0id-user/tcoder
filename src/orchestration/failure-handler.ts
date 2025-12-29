@@ -77,14 +77,25 @@ const incrementWorkerFailureCount = (machineId: string): Effect.Effect<number, R
 		const currentFailureCount = existingEntry?.failureCount ?? 0;
 		const newFailureCount = currentFailureCount + 1;
 
+		// Only update lastActiveAt when machine is doing work (running state)
+		// When machine is idle/failed, preserve the existing lastActiveAt
+		// so we can track how long the machine has been idle
+		// If lastActiveAt is missing but entry exists, fall back to createdAt (not now)
+		// to avoid resetting the idle timer
+		const currentState = existingEntry?.state || "running";
+		const lastActiveAt =
+			currentState === "running"
+				? now
+				: existingEntry?.lastActiveAt ?? existingEntry?.createdAt ?? now;
+
 		// Update pool entry with incremented failure count
 		yield* Effect.tryPromise({
 			try: async () => {
 				await client.hset(RedisKeys.machinesPool, {
 					[machineId]: serializeMachinePoolEntry({
 						machineId,
-						state: existingEntry?.state || "running",
-						lastActiveAt: now,
+						state: currentState,
+						lastActiveAt,
 						createdAt,
 						failureCount: newFailureCount,
 					}),
@@ -125,6 +136,12 @@ const markWorkerFailed = (machineId: string, reason: string): Effect.Effect<void
 		const createdAt = existingEntry?.createdAt || now;
 		const failureCount = existingEntry?.failureCount ?? 0;
 
+		// When marking as failed, preserve the existing lastActiveAt
+		// so we can track how long the machine has been idle/failed
+		// If lastActiveAt is missing but entry exists, fall back to createdAt (not now)
+		// to avoid resetting the idle timer
+		const lastActiveAt = existingEntry?.lastActiveAt ?? existingEntry?.createdAt ?? now;
+
 		// Update pool entry to failed state
 		yield* Effect.tryPromise({
 			try: async () => {
@@ -132,7 +149,7 @@ const markWorkerFailed = (machineId: string, reason: string): Effect.Effect<void
 					[machineId]: serializeMachinePoolEntry({
 						machineId,
 						state: "failed",
-						lastActiveAt: now,
+						lastActiveAt,
 						createdAt,
 						failureCount,
 					}),
