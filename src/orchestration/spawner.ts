@@ -7,8 +7,8 @@
 
 import { Effect, Schedule } from "effect";
 import { flyClient } from "../../fly/fly-client";
-import type { CreateMachineRequest, Machine } from "../../fly/fly-machine-apis";
-import { LoggerService, makeLoggerLayer, makeEffectLoggerLayer } from "../../packages/logger";
+import type { Components } from "../../fly/fly-machine-apis";
+import { LoggerService } from "../../packages/logger";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
 import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
 import { acquireMachineSlot, releaseMachineSlot } from "./admission";
@@ -47,7 +47,7 @@ export type SpawnerError =
  */
 const createMachine = (
 	config: SpawnConfig,
-	machineRequest: CreateMachineRequest,
+	machineRequest: Components.Schemas.CreateMachineRequest,
 ): Effect.Effect<SpawnResult, SpawnerError, LoggerService> =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
@@ -221,7 +221,7 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 			env.WEBHOOK_URL = config.webhookBaseUrl;
 		}
 
-		const machineRequest: CreateMachineRequest = {
+		const machineRequest: Components.Schemas.CreateMachineRequest = {
 			name: `ffmpeg-worker-${Date.now()}`,
 			region: config.flyRegion,
 			config: {
