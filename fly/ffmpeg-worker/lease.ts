@@ -155,12 +155,18 @@ export const updateMachineState = (
 		const createdAt = existingEntry?.createdAt || now;
 		const failureCount = existingEntry?.failureCount;
 
+		// Only update lastActiveAt when machine is doing work (running state)
+		// When transitioning to idle/failed, preserve the existing lastActiveAt
+		// so we can track how long the machine has been idle
+		const lastActiveAt =
+			state === "running" ? now : existingEntry?.lastActiveAt || now;
+
 		yield* redisEffect(
 			(client) =>
 				client.hset(RedisKeys.machinesPool, {
 					[machineId]: JSON.stringify({
 						state,
-						lastActiveAt: now,
+						lastActiveAt,
 						createdAt,
 						...(failureCount !== undefined && { failureCount }),
 					}),
