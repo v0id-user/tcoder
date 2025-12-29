@@ -7,6 +7,7 @@ import { type SpawnConfig, maybeSpawnWorker } from "../orchestration/spawner";
 import { makeRedisLayer } from "../redis/client";
 import { type JobData, RWOS_CONFIG, RedisKeys, deserializeJobData, serializeJobData } from "../redis/schema";
 import { extractJobIdFromKey } from "../r2/presigned";
+import { isDevMode } from "../utils/dev-mode";
 import { submitJobSchema } from "./schemas";
 import type { Env } from "./types";
 
@@ -111,8 +112,7 @@ const buildJobRoutes = () => {
 		})
 		.post("/jobs/:jobId/trigger-r2-event", zValidator("param", z.object({ jobId: z.string() })), async (c) => {
 			// Only allow in dev mode
-			const isDev = !c.env.FLY_API_TOKEN || c.env.FLY_API_TOKEN === "" || process.env.NODE_ENV === "development";
-			if (!isDev) {
+			if (!isDevMode(c.env.FLY_API_TOKEN)) {
 				return c.json({ error: "Not found" }, 404);
 			}
 

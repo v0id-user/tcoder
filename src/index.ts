@@ -16,17 +16,7 @@ import { stopMachine } from "./orchestration/machine-pool";
 import { type MessageBatch, type R2EventNotification, type RecoveryEnv, handleR2Events, recoverUploadingJob } from "./r2/events";
 import { makeRedisLayer } from "./redis/client";
 import { RWOS_CONFIG, RedisKeys, deserializeJobData, deserializeMachinePoolEntry } from "./redis/schema";
-
-// =============================================================================
-// Dev Mode Detection
-// =============================================================================
-
-/**
- * Check if we're in dev mode (local development with Docker worker).
- */
-const isDevMode = (env: Env): boolean => {
-	return !env.FLY_API_TOKEN || env.FLY_API_TOKEN === "" || process.env.NODE_ENV === "development";
-};
+import { isDevMode } from "./utils/dev-mode";
 
 // Create base app - Bindings type not needed for RPC type inference
 // Chain routes directly for proper RPC type inference
@@ -45,7 +35,7 @@ export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		// Log dev mode status on first request
 		if (!(globalThis as { _devModeLogged?: boolean })._devModeLogged) {
-			const devMode = isDevMode(env);
+			const devMode = isDevMode(env.FLY_API_TOKEN);
 			console.log(`[Worker] ${devMode ? "🔧 DEV MODE" : "🚀 PRODUCTION MODE"}`);
 			(globalThis as { _devModeLogged?: boolean })._devModeLogged = true;
 		}
@@ -77,7 +67,7 @@ async function handleScheduled(env: Env) {
 	const redis = Redis.fromEnv(env);
 
 	// Skip machine stopping in dev mode - local Docker worker runs continuously
-	if (!env.FLY_API_TOKEN || env.FLY_API_TOKEN === "" || process.env.NODE_ENV === "development") {
+	if (isDevMode(env.FLY_API_TOKEN)) {
 		console.log("[Cron] Dev mode: Skipping idle machine stop (local Docker worker runs continuously)");
 		await recoverStuckUploadingJobs(env);
 		return;

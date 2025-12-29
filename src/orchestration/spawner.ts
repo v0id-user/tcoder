@@ -10,6 +10,7 @@ import { flyClient } from "../../fly/fly-client";
 import type { CreateMachineRequest, Machine } from "../../fly/fly-machine-apis";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
 import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
+import { isDevMode } from "../utils/dev-mode";
 import { acquireMachineSlot, releaseMachineSlot } from "./admission";
 import { addMachineToPool, popStoppedMachine, startMachine } from "./machine-pool";
 
@@ -25,20 +26,6 @@ export interface SpawnConfig {
 	readonly redisToken: string;
 	readonly webhookBaseUrl: string;
 }
-
-// =============================================================================
-// Dev Mode Detection
-// =============================================================================
-
-/**
- * Check if we're in dev mode (local development with Docker worker).
- * In dev mode, we skip machine spawning and let the local Docker worker handle jobs.
- */
-const isDevMode = (config: SpawnConfig): boolean => {
-	// Check if FLY_API_TOKEN is missing or if we're explicitly in dev mode
-	// In dev, the Docker worker runs locally and picks up jobs from Redis
-	return !config.flyApiToken || config.flyApiToken === "" || process.env.NODE_ENV === "development";
-};
 
 export interface SpawnResult {
 	readonly machineId: string;
@@ -230,7 +217,7 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 export const maybeSpawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult | null, SpawnerError, RedisService> =>
 	Effect.gen(function* () {
 		// Skip machine spawning in dev mode - local Docker worker will handle jobs
-		if (isDevMode(config)) {
+		if (isDevMode(config.flyApiToken)) {
 			yield* Console.log("[Spawner] Dev mode: Skipping machine spawn (local Docker worker will handle jobs)");
 			return null;
 		}
