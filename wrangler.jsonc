@@ -3,17 +3,13 @@
 	"name": "tcoder",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-09-06",
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
+	"compatibility_flags": ["nodejs_compat"],
 	"observability": {
 		"enabled": true
 	},
 	// Cron trigger for stale job recovery (every 5 minutes)
 	"triggers": {
-		"crons": [
-			"*/5 * * * *"
-		]
+		"crons": ["*/5 * * * *"]
 	},
 	// Environment variables
 	"vars": {

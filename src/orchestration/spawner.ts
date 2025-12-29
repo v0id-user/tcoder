@@ -10,7 +10,6 @@ import { flyClient } from "../../fly/fly-client";
 import type { CreateMachineRequest, Machine } from "../../fly/fly-machine-apis";
 import { type RedisError, RedisService, redisEffect } from "../redis/client";
 import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
-import { isDevMode } from "../utils/dev-mode";
 import { acquireMachineSlot, releaseMachineSlot } from "./admission";
 import { addMachineToPool, popStoppedMachine, startMachine } from "./machine-pool";
 
@@ -212,16 +211,9 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 /**
  * Check if we should spawn a new worker.
  * Called when a new job is enqueued.
- * In dev mode, skips spawning and lets the local Docker worker handle jobs.
  */
 export const maybeSpawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult | null, SpawnerError, RedisService> =>
 	Effect.gen(function* () {
-		// Skip machine spawning in dev mode - local Docker worker will handle jobs
-		if (isDevMode(config.flyApiToken)) {
-			yield* Console.log("[Spawner] Dev mode: Skipping machine spawn (local Docker worker will handle jobs)");
-			return null;
-		}
-
 		// Quick capacity check without reserving
 		const { client } = yield* RedisService;
 
