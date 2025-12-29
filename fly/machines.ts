@@ -87,7 +87,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 			name: `ffmpeg-${job.jobId}`,
 			region: config.region,
 			config: {
-				image: "registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:deployment-01KDNKV6EAYB3RPDXZPFEW8XDW",
+				image: "registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:deployment-01KDNMS9DKVXT8WDTYQMX6F439",
 				// Pass job parameters as environment variables to the machine
 				env,
 				guest: {
