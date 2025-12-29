@@ -255,11 +255,18 @@ export const deserializeMachinePoolEntry = (
 		return null;
 	}
 
+	// Safely parse numeric values, only falling back to Date.now() if truly missing/invalid
+	const parsedLastActiveAt =
+		parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+	const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
+	const now = Date.now();
+
 	return {
 		machineId,
 		state: (parsed.state as MachinePoolEntry["state"]) || "running",
-		lastActiveAt: Number(parsed.lastActiveAt) || Date.now(),
-		createdAt: Number(parsed.createdAt) || Date.now(),
+		lastActiveAt:
+			parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt) ? parsedLastActiveAt : now,
+		createdAt: parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
 		failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 	};
 };

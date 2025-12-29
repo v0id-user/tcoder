@@ -62,19 +62,23 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 		// Get existing pool entry to preserve createdAt and failureCount
 		const existingEntry = yield* Effect.tryPromise({
 			try: async () => {
-				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
+				const data = await client.hget(RedisKeys.machinesPool, machineId);
 				if (data) {
-					try {
-						const parsed = JSON.parse(data);
-						return {
-							state: parsed.state || "running",
-							lastActiveAt: Number(parsed.lastActiveAt) || now,
-							createdAt: Number(parsed.createdAt) || now,
-							failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
-						};
-					} catch {
-						return null;
-					}
+					// Upstash SDK may auto-parse JSON, so handle both string and object
+					const parsed = typeof data === "string" ? JSON.parse(data) : data;
+					const parsedLastActiveAt =
+						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
+					return {
+						state: parsed.state || "running",
+						lastActiveAt:
+							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
+								? parsedLastActiveAt
+								: now,
+						createdAt:
+							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
+						failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
+					};
 				}
 				return null;
 			},
@@ -130,31 +134,28 @@ export const updateMachineState = (
 		// Get existing entry to preserve createdAt and failureCount
 		const existingEntry = yield* Effect.tryPromise({
 			try: async () => {
-				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
+				const data = await client.hget(RedisKeys.machinesPool, machineId);
 				if (data) {
-					try {
-						const parsed = JSON.parse(data);
-						// Preserve actual values from Redis - only use now as fallback if truly missing or invalid
-						// Check for null/undefined first, then validate that Number() produces a valid number (not NaN)
-						const parsedLastActiveAt =
-							parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
-						const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
-						// Validate that the numbers are actually valid (not NaN)
-						const lastActiveAt =
-							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
-								? parsedLastActiveAt
-								: now;
-						const createdAt =
-							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now;
-						return {
-							state: parsed.state || "running",
-							lastActiveAt,
-							createdAt,
-							failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
-						};
-					} catch {
-						return null;
-					}
+					// Upstash SDK may auto-parse JSON, so handle both string and object
+					const parsed = typeof data === "string" ? JSON.parse(data) : data;
+					// Preserve actual values from Redis - only use now as fallback if truly missing or invalid
+					// Check for null/undefined first, then validate that Number() produces a valid number (not NaN)
+					const parsedLastActiveAt =
+						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
+					// Validate that the numbers are actually valid (not NaN)
+					const lastActiveAt =
+						parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
+							? parsedLastActiveAt
+							: now;
+					const createdAt =
+						parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now;
+					return {
+						state: parsed.state || "running",
+						lastActiveAt,
+						createdAt,
+						failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
+					};
 				}
 				return null;
 			},
@@ -210,19 +211,23 @@ export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError
 		// Get existing entry to preserve createdAt and failureCount
 		const existingEntry = yield* Effect.tryPromise({
 			try: async () => {
-				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
+				const data = await client.hget(RedisKeys.machinesPool, machineId);
 				if (data) {
-					try {
-						const parsed = JSON.parse(data);
-						return {
-							state: parsed.state || "stopped",
-							lastActiveAt: Number(parsed.lastActiveAt) || now,
-							createdAt: Number(parsed.createdAt) || now,
-							failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
-						};
-					} catch {
-						return null;
-					}
+					// Upstash SDK may auto-parse JSON, so handle both string and object
+					const parsed = typeof data === "string" ? JSON.parse(data) : data;
+					const parsedLastActiveAt =
+						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
+					return {
+						state: parsed.state || "stopped",
+						lastActiveAt:
+							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
+								? parsedLastActiveAt
+								: now,
+						createdAt:
+							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
+						failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
+					};
 				}
 				return null;
 			},
@@ -462,19 +467,23 @@ const incrementWorkerFailureCount = (machineId: string): Effect.Effect<number, R
 		// Get existing entry to preserve createdAt and other fields
 		const existingEntry = yield* Effect.tryPromise({
 			try: async () => {
-				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
+				const data = await client.hget(RedisKeys.machinesPool, machineId);
 				if (data) {
-					try {
-						const parsed = JSON.parse(data);
-						return {
-							state: parsed.state || "running",
-							lastActiveAt: Number(parsed.lastActiveAt) || now,
-							createdAt: Number(parsed.createdAt) || now,
-							failureCount: Number(parsed.failureCount || 0),
-						};
-					} catch {
-						return null;
-					}
+					// Upstash SDK may auto-parse JSON, so handle both string and object
+					const parsed = typeof data === "string" ? JSON.parse(data) : data;
+					const parsedLastActiveAt =
+						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
+					return {
+						state: parsed.state || "running",
+						lastActiveAt:
+							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
+								? parsedLastActiveAt
+								: now,
+						createdAt:
+							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
+						failureCount: Number(parsed.failureCount || 0),
+					};
 				}
 				return null;
 			},
@@ -526,19 +535,23 @@ const markWorkerFailed = (machineId: string, reason: string): Effect.Effect<void
 		// Get existing entry to preserve createdAt
 		const existingEntry = yield* Effect.tryPromise({
 			try: async () => {
-				const data = await client.hget<string>(RedisKeys.machinesPool, machineId);
+				const data = await client.hget(RedisKeys.machinesPool, machineId);
 				if (data) {
-					try {
-						const parsed = JSON.parse(data);
-						return {
-							state: parsed.state || "running",
-							lastActiveAt: Number(parsed.lastActiveAt) || now,
-							createdAt: Number(parsed.createdAt) || now,
-							failureCount: Number(parsed.failureCount || 0),
-						};
-					} catch {
-						return null;
-					}
+					// Upstash SDK may auto-parse JSON, so handle both string and object
+					const parsed = typeof data === "string" ? JSON.parse(data) : data;
+					const parsedLastActiveAt =
+						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
+					return {
+						state: parsed.state || "running",
+						lastActiveAt:
+							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
+								? parsedLastActiveAt
+								: now,
+						createdAt:
+							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
+						failureCount: Number(parsed.failureCount || 0),
+					};
 				}
 				return null;
 			},
