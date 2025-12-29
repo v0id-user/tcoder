@@ -3,22 +3,22 @@
 	"name": "tcoder",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-09-06",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"observability": {
 		"enabled": true
 	},
-
 	// Cron trigger for stale job recovery (every 5 minutes)
 	"triggers": {
-		"crons": ["*/5 * * * *"]
+		"crons": [
+			"*/5 * * * *"
+		]
 	},
-
-
 	// Environment variables
 	"vars": {
 		"NODE_ENV": "production"
 	},
-
 	// R2 bucket bindings
 	"r2_buckets": [
 		{
@@ -30,7 +30,6 @@
 			"bucket_name": "tcoder-output"
 		}
 	],
-
 	// Queue bindings for R2 event notifications
 	"queues": {
 		"producers": [
@@ -47,7 +46,6 @@
 			}
 		]
 	}
-
 	// Environment variables (set via wrangler secret)
 	// UPSTASH_REDIS_REST_URL - Upstash Redis REST URL
 	// UPSTASH_REDIS_REST_TOKEN - Upstash Redis REST token
