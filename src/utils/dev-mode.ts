@@ -13,13 +13,27 @@
  * @returns true if in dev mode, false otherwise
  */
 export const isDevMode = (flyApiToken?: string): boolean => {
+	const tokenPresent = flyApiToken !== undefined && flyApiToken !== "";
+	const nodeEnv = process.env.NODE_ENV;
+	const isDevByToken = !tokenPresent;
+	const isDevByNodeEnv = nodeEnv === "development";
+
+	console.log("[DevMode] Checking dev mode:", {
+		tokenPresent,
+		tokenLength: flyApiToken?.length ?? 0,
+		nodeEnv: nodeEnv ?? "undefined",
+		isDevByToken,
+		isDevByNodeEnv,
+		result: isDevByToken || isDevByNodeEnv,
+	});
+
 	// Check if token is missing or empty
-	if (flyApiToken === undefined || flyApiToken === "") {
+	if (isDevByToken) {
 		return true;
 	}
 
 	// Check if explicitly in development mode
-	if (process.env.NODE_ENV === "development") {
+	if (isDevByNodeEnv) {
 		return true;
 	}
 

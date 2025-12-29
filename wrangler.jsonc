@@ -13,6 +13,12 @@
 		"crons": ["*/5 * * * *"]
 	},
 
+
+	// Environment variables
+	"vars": {
+		"NODE_ENV": "production"
+	},
+
 	// R2 bucket bindings
 	"r2_buckets": [
 		{
