@@ -6,9 +6,78 @@ import { z } from "zod";
 import { makeLoggerLayer, makeEffectLoggerLayer, LoggerService } from "../../packages/logger";
 import { type SpawnConfig, maybeSpawnWorker } from "../orchestration/spawner";
 import { makeRedisLayer } from "../redis/client";
-import { type JobData, RWOS_CONFIG, RedisKeys, deserializeJobData, serializeJobData } from "../redis/schema";
+import { type JobData, type JobOutput, RWOS_CONFIG, RedisKeys, deserializeJobData, serializeJobData } from "../redis/schema";
 import { submitJobSchema } from "./schemas";
 import type { Env } from "./types";
+
+/**
+ * Transform R2 storage URL to public and CDN URLs.
+ * Extracts the R2 key by removing the bucket name prefix from the path.
+ *
+ * Example:
+ * Input:  https://{accountId}.r2.cloudflarestorage.com/tcoder-output/outputs/{jobId}
+ * Output: https://pub-{id}.r2.dev/outputs/{jobId}
+ */
+const transformOutputUrl = (r2Url: string, env: Env): { url: string; cdnUrl?: string } => {
+	// If public URL is not configured, return original URL
+	if (!env.R2_PUBLIC_URL) {
+		return { url: r2Url };
+	}
+
+	try {
+		const urlObj = new URL(r2Url);
+
+		// Only transform R2 storage URLs (r2.cloudflarestorage.com)
+		// Skip if already a public URL or CDN URL
+		if (!urlObj.hostname.includes("r2.cloudflarestorage.com")) {
+			return { url: r2Url };
+		}
+
+		// Extract the path and remove the bucket name prefix
+		// Example: /tcoder-output/outputs/792eabb3-3314-44d1-b698-796220bd1e6c
+		// Should become: outputs/792eabb3-3314-44d1-b698-796220bd1e6c
+		const pathParts = urlObj.pathname.split("/").filter(Boolean);
+
+		// Remove the bucket name (first part) if it matches the output bucket name
+		if (pathParts.length > 0 && pathParts[0] === env.R2_OUTPUT_BUCKET_NAME) {
+			pathParts.shift();
+		}
+
+		const key = pathParts.join("/");
+
+		// Build public URL (ensure no double slashes)
+		const publicUrlBase = env.R2_PUBLIC_URL.replace(/\/$/, "");
+		const publicUrl = `${publicUrlBase}/${key}`;
+
+		// Build CDN URL if configured
+		const cdnUrl = env.BUNNY_CDN_URL
+			? `${env.BUNNY_CDN_URL.replace(/\/$/, "")}/${key}`
+			: undefined;
+
+		return { url: publicUrl, ...(cdnUrl && { cdnUrl }) };
+	} catch {
+		// If URL parsing fails, return original URL
+		return { url: r2Url };
+	}
+};
+
+/**
+ * Transform job outputs array, converting R2 URLs to public/CDN URLs.
+ */
+const transformOutputs = (outputs: JobOutput[] | undefined, env: Env): JobOutput[] | undefined => {
+	if (!outputs || outputs.length === 0) {
+		return outputs;
+	}
+
+	return outputs.map((output) => {
+		const transformed = transformOutputUrl(output.url, env);
+		return {
+			...output,
+			url: transformed.url,
+			...(transformed.cdnUrl && { cdnUrl: transformed.cdnUrl }),
+		};
+	});
+};
 
 const buildJobRoutes = () => {
 	/**
@@ -295,11 +364,14 @@ const buildJobRoutes = () => {
 					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 				);
 
+				// Transform output URLs to public/CDN URLs
+				const transformedOutputs = transformOutputs(job.outputs, c.env);
+
 				return c.json({
 					jobId: job.jobId,
 					status: job.status,
 					machineId: job.machineId,
-					outputs: job.outputs,
+					outputs: transformedOutputs,
 					error: job.error,
 					timestamps: job.timestamps,
 					filename: job.filename,

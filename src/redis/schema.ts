@@ -228,21 +228,38 @@ export const serializeMachinePoolEntry = (entry: MachinePoolEntry): string => {
 	});
 };
 
-export const deserializeMachinePoolEntry = (machineId: string, data: string | null): MachinePoolEntry | null => {
+export const deserializeMachinePoolEntry = (
+	machineId: string,
+	data: string | Record<string, unknown> | null,
+): MachinePoolEntry | null => {
 	if (!data) {
 		return null;
 	}
 
-	try {
-		const parsed = JSON.parse(data);
-		return {
-			machineId,
-			state: parsed.state || "running",
-			lastActiveAt: Number(parsed.lastActiveAt) || Date.now(),
-			createdAt: Number(parsed.createdAt) || Date.now(),
-			failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
-		};
-	} catch {
+	// Helper to safely parse JSON fields - handles both string and pre-parsed object
+	// (Upstash Redis SDK auto-parses JSON values in some contexts)
+	const safeParse = (): Record<string, unknown> | null => {
+		if (typeof data === "string") {
+			try {
+				return JSON.parse(data);
+			} catch {
+				return null;
+			}
+		}
+		// Value is already parsed (Upstash SDK auto-parsing)
+		return data as Record<string, unknown>;
+	};
+
+	const parsed = safeParse();
+	if (!parsed) {
 		return null;
 	}
+
+	return {
+		machineId,
+		state: (parsed.state as MachinePoolEntry["state"]) || "running",
+		lastActiveAt: Number(parsed.lastActiveAt) || Date.now(),
+		createdAt: Number(parsed.createdAt) || Date.now(),
+		failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
+	};
 };

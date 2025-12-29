@@ -87,13 +87,72 @@ async function handleScheduled(env: Env) {
 		const idleTimeout = RWOS_CONFIG.IDLE_TIMEOUT_MS;
 		const machinesToStop: string[] = [];
 
+		// Log total machines found
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const logger = yield* LoggerService;
+				yield* logger.info("Found machines in pool", {
+					total: Object.keys(poolEntries).length,
+					idleTimeoutMs: idleTimeout,
+					idleTimeoutSeconds: Math.round(idleTimeout / 1000),
+				});
+			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+		);
+
 		// Find idle machines that should be stopped
 		for (const [machineId, entryJson] of Object.entries(poolEntries)) {
 			const entry = deserializeMachinePoolEntry(machineId, entryJson);
-			if (!entry) continue;
+
+			if (!entry) {
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const logger = yield* LoggerService;
+						yield* logger.warn("Failed to deserialize machine pool entry", {
+							machineId,
+							entryJson: entryJson || "null",
+						});
+					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+				);
+				continue;
+			}
+
+			// Calculate idle duration (handle future timestamps due to clock skew)
+			const idleDuration = now - entry.lastActiveAt;
+			const isFutureTimestamp = idleDuration < 0;
+			const idleDurationSeconds = Math.round(Math.abs(idleDuration) / 1000);
+			const meetsIdleTimeout = !isFutureTimestamp && idleDuration >= idleTimeout;
+			const shouldStop = entry.state === "idle" && meetsIdleTimeout;
+
+			// Log details for each machine
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.info("Checking machine", {
+						machineId,
+						state: entry.state,
+						lastActiveAt: entry.lastActiveAt,
+						lastActiveAtISO: new Date(entry.lastActiveAt).toISOString(),
+						now,
+						nowISO: new Date(now).toISOString(),
+						idleDurationMs: idleDuration,
+						idleDurationSeconds,
+						isFutureTimestamp,
+						idleTimeoutMs: idleTimeout,
+						meetsIdleTimeout,
+						shouldStop,
+						reason: shouldStop
+							? "Idle and exceeds timeout"
+							: entry.state !== "idle"
+								? `State is "${entry.state}", not idle`
+								: isFutureTimestamp
+									? "LastActiveAt is in the future (clock skew)"
+									: `Idle for ${idleDurationSeconds}s, needs ${Math.round(idleTimeout / 1000)}s`,
+					});
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
 
 			// Check if machine is idle and has been idle for more than IDLE_TIMEOUT_MS
-			if (entry.state === "idle" && now - entry.lastActiveAt >= idleTimeout) {
+			if (shouldStop) {
 				machinesToStop.push(machineId);
 			}
 		}
@@ -102,7 +161,7 @@ async function handleScheduled(env: Env) {
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const logger = yield* LoggerService;
-					yield* logger.info("No idle machines to stop");
+					yield* logger.info("No idle machines to stop after checking all machines");
 				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 			);
 			await recoverStuckUploadingJobs(env);
