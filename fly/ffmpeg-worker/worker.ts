@@ -436,10 +436,13 @@ const workerLoop = Effect.gen(function* () {
 			Effect.gen(function* () {
 				// Cleanup on exit
 				const loopDuration = Date.now() - loopStartTime;
+				const workerUptime = Date.now() - startedAt;
 				yield* logger.debug("[workerLoop] Exiting", {
 					machineId,
 					jobsProcessed,
 					loopDuration: `${loopDuration}ms`,
+					workerUptime: `${workerUptime}ms`,
+					startedAt,
 				});
 				yield* cleanupWorker(machineId).pipe(Effect.catchAll(() => Effect.void));
 				yield* logWorkerStopped(logger, machineId, jobsProcessed);
