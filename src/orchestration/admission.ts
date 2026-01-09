@@ -67,18 +67,17 @@ export const waitForRateLimit = (): Effect.Effect<void, RedisError, RedisService
 
 /**
  * Check if we have capacity to create a new machine.
- * Counts all machines in pool (running + stopped) vs MAX_MACHINES.
+ * Uses counter which tracks all machines (running + stopped) + in-flight creations.
  */
 export const checkCapacity = (): Effect.Effect<{ allowed: boolean; currentMachines: number }, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
-		// Count machines in pool (running + stopped)
-		const poolEntries = yield* redisEffect((client) => client.hgetall<Record<string, string>>(RedisKeys.machinesPool));
-
-		const currentMachines = poolEntries ? Object.keys(poolEntries).length : 0;
+		// Read current counter value (includes in-flight reservations)
+		const currentSlots = yield* redisEffect((client) => client.get<number>(RedisKeys.countersActiveMachines));
+		const currentMachines = currentSlots || 0;
 		const allowed = currentMachines < RWOS_CONFIG.MAX_MACHINES;
 
-		yield* logger.info("Capacity check", {
+		yield* logger.info("Capacity check (counter-based)", {
 			currentMachines,
 			maxMachines: RWOS_CONFIG.MAX_MACHINES,
 			allowed,
@@ -129,15 +128,26 @@ export const releaseMachineSlot = (): Effect.Effect<number, RedisError, RedisSer
 /**
  * Full admission check: capacity only (Fly handles rate limiting with 429s).
  * Returns true if a machine can be created.
+ * Note: This is a non-atomic check - use acquireMachineSlot for atomic reservation.
  */
 export const canCreateMachine = (): Effect.Effect<{ allowed: boolean; reason?: string }, RedisError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
-		// Check capacity (pool-based: running + stopped)
-		const { allowed, currentMachines } = yield* checkCapacity();
+		const logger = yield* LoggerService;
+		// Read current counter value (includes in-flight reservations)
+		const currentSlots = yield* redisEffect((client) => client.get<number>(RedisKeys.countersActiveMachines));
+		const currentCount = currentSlots || 0;
+		const allowed = currentCount < RWOS_CONFIG.MAX_MACHINES;
+
+		yield* logger.info("Capacity check (counter-based)", {
+			currentSlots: currentCount,
+			maxMachines: RWOS_CONFIG.MAX_MACHINES,
+			allowed,
+		});
+
 		if (!allowed) {
 			return {
 				allowed: false,
-				reason: `Capacity full (${currentMachines}/${RWOS_CONFIG.MAX_MACHINES})`,
+				reason: `Capacity full (${currentCount}/${RWOS_CONFIG.MAX_MACHINES})`,
 			};
 		}
 
@@ -146,7 +156,8 @@ export const canCreateMachine = (): Effect.Effect<{ allowed: boolean; reason?: s
 
 /**
  * Attempt to acquire a machine slot with admission control.
- * Checks capacity (pool-based), no rate limit waiting (Fly handles 429s).
+ * Uses atomic INCR to prevent race conditions - each request gets a unique slot number.
+ * If the slot number exceeds MAX_MACHINES, immediately releases and rejects.
  */
 export const acquireMachineSlot = (): Effect.Effect<
 	{ acquired: boolean; slotNumber?: number; reason?: string },
@@ -155,38 +166,28 @@ export const acquireMachineSlot = (): Effect.Effect<
 > =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
-		yield* logger.info("Attempting to acquire machine slot");
+		yield* logger.info("Attempting to acquire machine slot (atomic)");
 
-		// Check capacity (pool-based: running + stopped)
-		const { allowed, currentMachines } = yield* checkCapacity();
-		if (!allowed) {
-			const reason = `Capacity full (${currentMachines}/${RWOS_CONFIG.MAX_MACHINES})`;
-			yield* logger.warn("Admission control: capacity full", {
-				currentMachines,
-				maxMachines: RWOS_CONFIG.MAX_MACHINES,
-			});
-			return {
-				acquired: false,
-				reason,
-			};
-		}
+		// ATOMIC: Increment counter first to reserve slot
+		// This ensures each concurrent request gets a unique slot number
+		const slotNumber = yield* redisEffect((client) => client.incr(RedisKeys.countersActiveMachines));
 
-		// Reserve slot (increment counter for tracking)
-		const slotNumber = yield* reserveMachineSlot();
+		yield* logger.info("Slot number assigned", {
+			slotNumber,
+			maxMachines: RWOS_CONFIG.MAX_MACHINES,
+		});
 
-		// Double-check we didn't exceed limit (race condition protection)
-		// Note: This uses the counter, but actual capacity is pool-based
-		const { allowed: stillAllowed, currentMachines: newCurrentMachines } = yield* checkCapacity();
-		if (!stillAllowed) {
-			yield* logger.warn("Capacity exceeded after reservation (race condition)", {
-				currentMachines: newCurrentMachines,
-				maxMachines: RWOS_CONFIG.MAX_MACHINES,
+		// Check if we exceeded the limit
+		if (slotNumber > RWOS_CONFIG.MAX_MACHINES) {
+			// Over capacity - release slot and reject
+			yield* logger.warn("Admission control: capacity full (atomic check)", {
 				slotNumber,
+				maxMachines: RWOS_CONFIG.MAX_MACHINES,
 			});
 			yield* releaseMachineSlot();
 			return {
 				acquired: false,
-				reason: "Capacity exceeded after reservation",
+				reason: `Capacity full (${slotNumber - 1}/${RWOS_CONFIG.MAX_MACHINES})`,
 			};
 		}
 
@@ -196,15 +197,15 @@ export const acquireMachineSlot = (): Effect.Effect<
 
 /**
  * Get current admission stats for monitoring.
- * Returns pool size (running + stopped) and max machines.
+ * Returns counter value (includes in-flight reservations) and max machines.
  */
 export const getAdmissionStats = (): Effect.Effect<{ activeMachines: number; maxMachines: number }, RedisError, RedisService> =>
 	Effect.gen(function* () {
-		const poolEntries = yield* redisEffect((client) => client.hgetall<Record<string, string>>(RedisKeys.machinesPool));
-		const poolSize = poolEntries ? Object.keys(poolEntries).length : 0;
+		// Use counter for accurate tracking (includes in-flight machine creations)
+		const currentSlots = yield* redisEffect((client) => client.get<number>(RedisKeys.countersActiveMachines));
 
 		return {
-			activeMachines: poolSize,
+			activeMachines: currentSlots || 0,
 			maxMachines: RWOS_CONFIG.MAX_MACHINES,
 		};
 	});

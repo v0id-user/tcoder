@@ -238,6 +238,7 @@ export const stopMachine = (machineId: string, config: FlyConfig): Effect.Effect
 /**
  * Sync machine pool state with Fly API.
  * Called on startup/recovery to ensure Redis matches actual Fly machine states.
+ * Also syncs the active machines counter to match the pool size.
  */
 export const syncMachinePool = (config: FlyConfig): Effect.Effect<void, FlyApiError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
@@ -358,24 +359,32 @@ export const syncMachinePool = (config: FlyConfig): Effect.Effect<void, FlyApiEr
 			}
 		}
 
-		if (updated > 0) {
-			yield* Effect.tryPromise({
-				try: () => pipe.exec(),
-				catch: (e) => ({
-					_tag: "CommandError" as const,
-					reason: e instanceof Error ? e.message : String(e),
-				}),
-			}).pipe(
-				Effect.catchAll((err) =>
-					Effect.gen(function* () {
-						yield* logger.error("Redis error syncing pool entries", err, { updated });
-						return yield* Effect.fail(err);
-					}),
-				),
-			);
-		}
+		// CRITICAL: Sync counter to match actual pool size
+		// This ensures the counter is accurate after recovery/restart
+		// The counter tracks total machines (running + stopped) to prevent over-provisioning
+		const actualMachineCount = flyMachines.size;
+		pipe.set(RedisKeys.countersActiveMachines, String(actualMachineCount));
 
-		yield* logger.info("Pool sync completed", { updated });
+		yield* Effect.tryPromise({
+			try: () => pipe.exec(),
+			catch: (e) => ({
+				_tag: "CommandError" as const,
+				reason: e instanceof Error ? e.message : String(e),
+			}),
+		}).pipe(
+			Effect.catchAll((err) =>
+				Effect.gen(function* () {
+					yield* logger.error("Redis error syncing pool entries", err, { updated });
+					return yield* Effect.fail(err);
+				}),
+			),
+		);
+
+		yield* logger.info("Pool sync completed", {
+			updated,
+			machineCount: actualMachineCount,
+			counterSynced: true,
+		});
 	});
 
 /**

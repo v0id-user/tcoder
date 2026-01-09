@@ -7,6 +7,7 @@
 
 import type { Redis } from "@upstash/redis/cloudflare";
 import { Effect, Layer } from "effect";
+import { makeEffectLoggerLayer, makeLoggerLayer } from "../packages/logger";
 import { type RedisError, RedisService } from "../src/redis/client";
 import type { JobData, MachinePoolEntry } from "../src/redis/schema";
 
@@ -400,22 +401,35 @@ export function createMockRedisLayer(mockRedis: MockRedis = new MockRedis()): La
 }
 
 /**
- * Run an Effect program with a mock Redis layer
+ * Create combined layers for Redis and Logger (for most tests)
  */
-export async function runWithMockRedis<T, E>(program: Effect.Effect<T, E, RedisService>, mockRedis?: MockRedis): Promise<T> {
-	const layer = createMockRedisLayer(mockRedis);
-	return Effect.runPromise(program.pipe(Effect.provide(layer)));
+export function createTestLayers(mockRedis: MockRedis = new MockRedis()) {
+	const redisLayer = createMockRedisLayer(mockRedis);
+	const loggerLayer = makeLoggerLayer({ component: "Test", logLevel: "error" });
+	const effectLoggerLayer = makeEffectLoggerLayer("error");
+	return Layer.mergeAll(redisLayer, loggerLayer, effectLoggerLayer);
+}
+
+/**
+ * Run an Effect program with mock Redis and Logger layers
+ */
+export async function runWithMockRedis<T, E, R>(
+	program: Effect.Effect<T, E, R>,
+	mockRedis?: MockRedis,
+): Promise<T> {
+	const layer = createTestLayers(mockRedis);
+	return Effect.runPromise(program.pipe(Effect.provide(layer as Layer.Layer<R>)));
 }
 
 /**
  * Run an Effect program and get the Exit result (for error testing)
  */
-export async function runWithMockRedisExit<T, E>(
-	program: Effect.Effect<T, E, RedisService>,
+export async function runWithMockRedisExit<T, E, R>(
+	program: Effect.Effect<T, E, R>,
 	mockRedis?: MockRedis,
 ): Promise<import("effect/Exit").Exit<T, E>> {
-	const layer = createMockRedisLayer(mockRedis);
-	return Effect.runPromiseExit(program.pipe(Effect.provide(layer)));
+	const layer = createTestLayers(mockRedis);
+	return Effect.runPromiseExit(program.pipe(Effect.provide(layer as Layer.Layer<R>)));
 }
 
 /**

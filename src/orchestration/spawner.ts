@@ -290,37 +290,36 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 /**
  * Check if we should spawn a new worker.
  * Called when a new job is enqueued.
+ * Uses counter-based capacity check to include in-flight creations.
+ * Skips spawning in dev mode (no FLY_API_TOKEN or NODE_ENV=development).
  */
 export const maybeSpawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult | null, SpawnerError, RedisService | LoggerService> =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
 		yield* logger.info("maybeSpawnWorker: checking if worker should be spawned");
 
-		// Quick capacity check without reserving
-		const { client } = yield* RedisService;
+		// Skip spawning in dev mode
+		if (!config.flyApiToken || process.env.NODE_ENV === "development") {
+			yield* logger.info("Skipping spawn: dev mode detected", {
+				hasToken: !!config.flyApiToken,
+				nodeEnv: process.env.NODE_ENV,
+			});
+			return null;
+		}
 
-		const poolEntries = yield* Effect.tryPromise({
-			try: async () => {
-				const data = await client.hgetall<Record<string, string>>(RedisKeys.machinesPool);
-				return data || {};
-			},
-			catch: (e) => ({
-				_tag: "CommandError" as const,
-				reason: e instanceof Error ? e.message : String(e),
-			}),
-		});
+		// Quick capacity check using counter (includes in-flight creations)
+		const currentSlots = yield* redisEffect((client) => client.get<number>(RedisKeys.countersActiveMachines));
+		const currentCount = currentSlots || 0;
 
-		const poolSize = Object.keys(poolEntries).length;
-
-		yield* logger.info("Capacity check", {
-			currentMachines: poolSize,
+		yield* logger.info("Capacity check (counter-based)", {
+			currentSlots: currentCount,
 			maxMachines: RWOS_CONFIG.MAX_MACHINES,
-			atCapacity: poolSize >= RWOS_CONFIG.MAX_MACHINES,
+			atCapacity: currentCount >= RWOS_CONFIG.MAX_MACHINES,
 		});
 
-		if (poolSize >= RWOS_CONFIG.MAX_MACHINES) {
+		if (currentCount >= RWOS_CONFIG.MAX_MACHINES) {
 			yield* logger.info("At capacity, not spawning worker", {
-				currentMachines: poolSize,
+				currentSlots: currentCount,
 				maxMachines: RWOS_CONFIG.MAX_MACHINES,
 			});
 			return null;

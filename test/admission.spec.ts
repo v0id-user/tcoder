@@ -4,7 +4,6 @@
  * Tests rate limiting, capacity checking, and slot acquisition logic.
  */
 
-import { Clock, Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	acquireMachineSlot,
@@ -15,7 +14,7 @@ import {
 	waitForRateLimit,
 } from "../src/orchestration/admission";
 import { RWOS_CONFIG, RedisKeys } from "../src/redis/schema";
-import { MockRedis, createMockRedisLayer, extractErrorFromExit, runWithMockRedis, runWithMockRedisExit } from "./test-helpers";
+import { MockRedis, extractErrorFromExit, runWithMockRedis, runWithMockRedisExit } from "./test-helpers";
 
 describe("Admission Controller", () => {
 	let mockRedis: MockRedis;
@@ -78,141 +77,121 @@ describe("Admission Controller", () => {
 	});
 
 	describe("checkCapacity", () => {
-		it("returns true when pool is empty", async () => {
+		it("returns true when counter is zero", async () => {
 			const result = await runWithMockRedis(checkCapacity(), mockRedis);
 			expect(result.allowed).toBe(true);
 			expect(result.currentMachines).toBe(0);
 		});
 
-		it("returns true when below max capacity", async () => {
-			// Add some machines to pool
+		it("returns true when counter is below max capacity", async () => {
+			// Set counter to max - 1
 			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
-			const machinesToAdd = maxMachines - 1;
-
-			for (let i = 0; i < machinesToAdd; i++) {
-				const machineId = `machine-${i}`;
-				await mockRedis.hset(RedisKeys.machinesPool, {
-					[machineId]: JSON.stringify({
-						state: "running",
-						lastActiveAt: Date.now(),
-						createdAt: Date.now(),
-					}),
-				});
-			}
+			const currentCount = maxMachines - 1;
+			await mockRedis.set(RedisKeys.countersActiveMachines, String(currentCount));
 
 			const result = await runWithMockRedis(checkCapacity(), mockRedis);
 			expect(result.allowed).toBe(true);
-			expect(result.currentMachines).toBe(machinesToAdd);
+			expect(result.currentMachines).toBe(currentCount);
 		});
 
-		it("returns false when at max capacity", async () => {
-			// Fill pool to max capacity
+		it("returns false when counter is at max capacity", async () => {
+			// Set counter to max capacity
 			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
-
-			for (let i = 0; i < maxMachines; i++) {
-				const machineId = `machine-${i}`;
-				await mockRedis.hset(RedisKeys.machinesPool, {
-					[machineId]: JSON.stringify({
-						state: "running",
-						lastActiveAt: Date.now(),
-						createdAt: Date.now(),
-					}),
-				});
-			}
+			await mockRedis.set(RedisKeys.countersActiveMachines, String(maxMachines));
 
 			const result = await runWithMockRedis(checkCapacity(), mockRedis);
 			expect(result.allowed).toBe(false);
 			expect(result.currentMachines).toBe(maxMachines);
 		});
 
-		it("counts both running and stopped machines", async () => {
-			// Add mix of running and stopped machines
-			await mockRedis.hset(RedisKeys.machinesPool, {
-				"machine-1": JSON.stringify({
-					state: "running",
-					lastActiveAt: Date.now(),
-					createdAt: Date.now(),
-				}),
-				"machine-2": JSON.stringify({
-					state: "stopped",
-					lastActiveAt: Date.now(),
-					createdAt: Date.now(),
-				}),
-				"machine-3": JSON.stringify({
-					state: "idle",
-					lastActiveAt: Date.now(),
-					createdAt: Date.now(),
-				}),
-			});
+		it("returns false when counter exceeds max capacity", async () => {
+			// Set counter above max (edge case - shouldn't happen but should be handled)
+			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
+			await mockRedis.set(RedisKeys.countersActiveMachines, String(maxMachines + 1));
 
 			const result = await runWithMockRedis(checkCapacity(), mockRedis);
-			expect(result.currentMachines).toBe(3);
+			expect(result.allowed).toBe(false);
+			expect(result.currentMachines).toBe(maxMachines + 1);
 		});
 	});
 
 	describe("acquireMachineSlot", () => {
-		it("acquires slot when capacity available", async () => {
+		it("acquires slot when counter is zero", async () => {
 			const result = await runWithMockRedis(acquireMachineSlot(), mockRedis);
 			expect(result.acquired).toBe(true);
-			expect(result.slotNumber).toBeGreaterThan(0);
+			expect(result.slotNumber).toBe(1);
 		});
 
-		it("fails when capacity full", async () => {
-			// Fill pool to max capacity
-			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
+		it("acquires slot when counter is below max", async () => {
+			// Set counter to some value below max
+			await mockRedis.set(RedisKeys.countersActiveMachines, "5");
 
-			for (let i = 0; i < maxMachines; i++) {
-				const machineId = `machine-${i}`;
-				await mockRedis.hset(RedisKeys.machinesPool, {
-					[machineId]: JSON.stringify({
-						state: "running",
-						lastActiveAt: Date.now(),
-						createdAt: Date.now(),
-					}),
-				});
-			}
+			const result = await runWithMockRedis(acquireMachineSlot(), mockRedis);
+			expect(result.acquired).toBe(true);
+			expect(result.slotNumber).toBe(6);
+		});
+
+		it("fails when counter is at max capacity", async () => {
+			// Set counter to max capacity
+			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
+			await mockRedis.set(RedisKeys.countersActiveMachines, String(maxMachines));
 
 			const result = await runWithMockRedis(acquireMachineSlot(), mockRedis);
 			expect(result.acquired).toBe(false);
 			expect(result.reason).toContain("Capacity full");
+
+			// Counter should be back to max (slot released)
+			const count = await mockRedis.get<number>(RedisKeys.countersActiveMachines);
+			expect(count).toBe(maxMachines);
 		});
 
-		it("increments counter when acquiring slot", async () => {
+		it("increments counter atomically when acquiring slot", async () => {
 			await runWithMockRedis(acquireMachineSlot(), mockRedis);
 			const count = await mockRedis.get<number>(RedisKeys.countersActiveMachines);
 			expect(count).toBe(1);
 		});
 
-		it("releases slot if capacity exceeded after reservation", async () => {
-			// Fill pool to max - 1
+		it("releases slot when exceeding capacity (atomic check)", async () => {
+			// Set counter to max - 1, so next INCR will hit exactly max
 			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
+			await mockRedis.set(RedisKeys.countersActiveMachines, String(maxMachines - 1));
 
-			for (let i = 0; i < maxMachines - 1; i++) {
-				const machineId = `machine-${i}`;
-				await mockRedis.hset(RedisKeys.machinesPool, {
-					[machineId]: JSON.stringify({
-						state: "running",
-						lastActiveAt: Date.now(),
-						createdAt: Date.now(),
-					}),
-				});
-			}
+			// First acquisition should succeed (slot = max)
+			const result1 = await runWithMockRedis(acquireMachineSlot(), mockRedis);
+			expect(result1.acquired).toBe(true);
+			expect(result1.slotNumber).toBe(maxMachines);
 
-			// Add one more machine concurrently (simulating race condition)
-			const machineId = `machine-${maxMachines}`;
-			await mockRedis.hset(RedisKeys.machinesPool, {
-				[machineId]: JSON.stringify({
-					state: "running",
-					lastActiveAt: Date.now(),
-					createdAt: Date.now(),
-				}),
-			});
+			// Second acquisition should fail (slot = max + 1, exceeds limit)
+			const result2 = await runWithMockRedis(acquireMachineSlot(), mockRedis);
+			expect(result2.acquired).toBe(false);
+			expect(result2.reason).toContain("Capacity full");
 
-			// Now capacity check should fail (pool is at max capacity)
-			// Since pool is already at max, first check fails before reservation
-			const result = await runWithMockRedis(acquireMachineSlot(), mockRedis);
-			expect(result.acquired).toBe(false);
-			expect(result.reason).toContain("Capacity full");
+			// Counter should be back to max (slot was released)
+			const count = await mockRedis.get<number>(RedisKeys.countersActiveMachines);
+			expect(count).toBe(maxMachines);
+		});
+
+		it("handles concurrent slot acquisitions atomically", async () => {
+			// Start with counter at max - 2
+			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
+			await mockRedis.set(RedisKeys.countersActiveMachines, String(maxMachines - 2));
+
+			// Acquire two slots - both should succeed
+			const result1 = await runWithMockRedis(acquireMachineSlot(), mockRedis);
+			const result2 = await runWithMockRedis(acquireMachineSlot(), mockRedis);
+
+			expect(result1.acquired).toBe(true);
+			expect(result2.acquired).toBe(true);
+			expect(result1.slotNumber).toBe(maxMachines - 1);
+			expect(result2.slotNumber).toBe(maxMachines);
+
+			// Third acquisition should fail
+			const result3 = await runWithMockRedis(acquireMachineSlot(), mockRedis);
+			expect(result3.acquired).toBe(false);
+
+			// Counter should be at max
+			const count = await mockRedis.get<number>(RedisKeys.countersActiveMachines);
+			expect(count).toBe(maxMachines);
 		});
 	});
 
@@ -250,29 +229,29 @@ describe("Admission Controller", () => {
 	});
 
 	describe("getAdmissionStats", () => {
-		it("returns correct stats for empty pool", async () => {
+		it("returns correct stats for zero counter", async () => {
 			const result = await runWithMockRedis(getAdmissionStats(), mockRedis);
 			expect(result.activeMachines).toBe(0);
 			expect(result.maxMachines).toBe(RWOS_CONFIG.MAX_MACHINES);
 		});
 
-		it("returns correct stats for populated pool", async () => {
-			// Add machines to pool
-			const machines = ["machine-1", "machine-2", "machine-3"];
-
-			for (const machineId of machines) {
-				await mockRedis.hset(RedisKeys.machinesPool, {
-					[machineId]: JSON.stringify({
-						state: "running",
-						lastActiveAt: Date.now(),
-						createdAt: Date.now(),
-					}),
-				});
-			}
+		it("returns correct stats when counter has value", async () => {
+			// Set counter to 3
+			await mockRedis.set(RedisKeys.countersActiveMachines, "3");
 
 			const result = await runWithMockRedis(getAdmissionStats(), mockRedis);
 			expect(result.activeMachines).toBe(3);
 			expect(result.maxMachines).toBe(RWOS_CONFIG.MAX_MACHINES);
+		});
+
+		it("returns correct stats when counter is at max", async () => {
+			// Set counter to max
+			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
+			await mockRedis.set(RedisKeys.countersActiveMachines, String(maxMachines));
+
+			const result = await runWithMockRedis(getAdmissionStats(), mockRedis);
+			expect(result.activeMachines).toBe(maxMachines);
+			expect(result.maxMachines).toBe(maxMachines);
 		});
 	});
 
@@ -280,9 +259,8 @@ describe("Admission Controller", () => {
 		it("handles Redis connection errors gracefully", async () => {
 			// Create a mock Redis that throws errors
 			const errorRedis = new MockRedis();
-			// Mock a method to throw an error
-			const originalHgetall = errorRedis.hgetall.bind(errorRedis);
-			errorRedis.hgetall = async () => {
+			// Mock get method to throw an error (used by checkCapacity)
+			errorRedis.get = async () => {
 				throw new Error("Connection failed");
 			};
 

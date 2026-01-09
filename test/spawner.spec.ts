@@ -74,24 +74,34 @@ describe("Spawner", () => {
 	});
 
 	describe("maybeSpawnWorker - Capacity Checks", () => {
-		it("skips spawning when at max capacity", async () => {
-			// Fill pool to max capacity
+		it("skips spawning when counter is at max capacity", async () => {
+			// Set counter to max capacity
 			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
-
-			for (let i = 0; i < maxMachines; i++) {
-				const machineId = `machine-${i}`;
-				await mockRedis.hset(RedisKeys.machinesPool, {
-					[machineId]: serializeMachinePoolEntry(
-						createTestMachinePoolEntry({
-							machineId,
-							state: "running",
-						}),
-					),
-				});
-			}
+			await mockRedis.set(RedisKeys.countersActiveMachines, String(maxMachines));
 
 			const result = await runWithMockRedis(maybeSpawnWorker(baseConfig), mockRedis);
 			expect(result).toBeNull();
+		});
+
+		it("attempts spawn when counter is below max", async () => {
+			// Set counter below max
+			await mockRedis.set(RedisKeys.countersActiveMachines, "5");
+
+			// Mock Fly API to succeed
+			const newMachineId = "new-machine-123";
+			// biome-ignore lint/suspicious/noExplicitAny: Mock function requires any
+			(flyClient.Machines_create as any).mockResolvedValue({
+				data: {
+					id: newMachineId,
+					state: "started",
+				},
+			} as never);
+
+			const result = await runWithMockRedis(maybeSpawnWorker(baseConfig), mockRedis);
+			expect(result).not.toBeNull();
+			if (result) {
+				expect(result.machineId).toBe(newMachineId);
+			}
 		});
 	});
 
@@ -154,21 +164,10 @@ describe("Spawner", () => {
 			expect(poolEntry).not.toBeNull();
 		});
 
-		it("fails when capacity is full", async () => {
-			// Fill pool to max capacity
+		it("fails when capacity is full (counter at max)", async () => {
+			// Set counter to max capacity
 			const maxMachines = RWOS_CONFIG.MAX_MACHINES;
-
-			for (let i = 0; i < maxMachines; i++) {
-				const machineId = `machine-${i}`;
-				await mockRedis.hset(RedisKeys.machinesPool, {
-					[machineId]: serializeMachinePoolEntry(
-						createTestMachinePoolEntry({
-							machineId,
-							state: "running",
-						}),
-					),
-				});
-			}
+			await mockRedis.set(RedisKeys.countersActiveMachines, String(maxMachines));
 
 			const exit = await runWithMockRedisExit(spawnWorker(baseConfig), mockRedis);
 			const error = extractErrorFromExit(exit);
@@ -177,6 +176,10 @@ describe("Spawner", () => {
 			if (error && typeof error === "object" && "_tag" in error) {
 				expect(error._tag).toBe("CapacityFull");
 			}
+
+			// Counter should still be at max (slot was released after failure)
+			const count = await mockRedis.get<number>(RedisKeys.countersActiveMachines);
+			expect(count).toBe(maxMachines);
 		});
 
 		it("releases slot on creation failure", async () => {
