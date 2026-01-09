@@ -202,6 +202,25 @@ const runFFmpeg = (args: string[]) =>
 		yield* logger.debug("[runFFmpeg] Exiting", { duration: `${duration}ms` });
 	});
 
+/**
+ * Generate a descriptive quality name based on context.
+ * Uses provided outputQualities when available, otherwise derives from preset and index.
+ */
+const getQualityName = (config: JobConfig, index: number, totalOutputs: number): string => {
+	// If quality is explicitly provided, use it (e.g., "720p", "1080p", "web")
+	if (config.outputQualities?.[index]) {
+		return config.outputQualities[index];
+	}
+
+	// For single output without explicit quality, use preset name
+	if (totalOutputs === 1) {
+		return config.preset;
+	}
+
+	// For multiple outputs without explicit qualities, combine preset with index
+	return `${config.preset}-${index + 1}`;
+};
+
 const uploadOutputs = (config: JobConfig, localOutputPaths: string[]) =>
 	Effect.gen(function* () {
 		const logger = yield* LoggerService;
@@ -216,7 +235,7 @@ const uploadOutputs = (config: JobConfig, localOutputPaths: string[]) =>
 
 		for (let i = 0; i < localOutputPaths.length; i++) {
 			const localPath = localOutputPaths[i];
-			const quality = config.outputQualities?.[i] || `quality-${i + 1}`;
+			const quality = getQualityName(config, i, localOutputPaths.length);
 			const baseR2Key = extractR2Key(config.outputUrl);
 			const ext = localPath.match(/\.([^.]+)$/)?.[1] || "mp4";
 			const r2Key = config.outputQualities ? `${baseR2Key.replace(/\.[^/.]+$/, "")}-${quality}.${ext}` : baseR2Key;
