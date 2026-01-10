@@ -8,6 +8,7 @@
 import { Redis } from "@upstash/redis/cloudflare";
 import { Effect } from "effect";
 import { makeLoggerLayer, makeEffectLoggerLayer, LoggerService } from "../../packages/logger";
+import { failJob } from "../orchestration/job-manager";
 import { type SpawnConfig, maybeSpawnWorker } from "../orchestration/spawner";
 import { makeRedisLayer } from "../redis/client";
 import { type JobData, RWOS_CONFIG, RedisKeys, serializeJobData } from "../redis/schema";
@@ -115,6 +116,10 @@ export async function handleR2Events(batch: MessageBatch<R2EventNotification>, e
 		const objectSize = event.object.size;
 		const maxSizeBytes = 350 * 1024 * 1024; // 350MB
 
+		// Extract job ID from object key (format: inputs/{jobId}/filename)
+		// Extract early so we can mark job as failed if size limit is exceeded
+		const jobId = extractJobIdFromKey(objectKey);
+
 		// Check if file exceeds size limit
 		if (objectSize > maxSizeBytes) {
 			await Effect.runPromise(
@@ -125,9 +130,33 @@ export async function handleR2Events(batch: MessageBatch<R2EventNotification>, e
 						size: objectSize,
 						sizeMB: Math.round((objectSize / 1024 / 1024) * 100) / 100,
 						maxSizeMB: 350,
+						jobId: jobId || undefined,
 					});
 				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 			);
+
+			// Mark job as failed in Redis if jobId exists
+			if (jobId) {
+				const redisLayer = makeRedisLayer({
+					UPSTASH_REDIS_REST_URL: env.UPSTASH_REDIS_REST_URL,
+					UPSTASH_REDIS_REST_TOKEN: env.UPSTASH_REDIS_REST_TOKEN,
+				});
+
+				await Effect.runPromise(
+					failJob(jobId, `File exceeds size limit (350MB). Actual size: ${Math.round((objectSize / 1024 / 1024) * 100) / 100}MB`).pipe(
+						Effect.catchAll((err) =>
+							Effect.gen(function* () {
+								const logger = yield* LoggerService;
+								yield* logger.error("Failed to mark job as failed in Redis", err, { jobId, objectKey });
+								return undefined;
+							}),
+						),
+						Effect.provide(redisLayer),
+						Effect.provide(loggerLayer),
+						Effect.provide(effectLoggerLayer),
+					),
+				);
+			}
 
 			// Delete the oversized file
 			try {
@@ -135,14 +164,14 @@ export async function handleR2Events(batch: MessageBatch<R2EventNotification>, e
 				await Effect.runPromise(
 					Effect.gen(function* () {
 						const logger = yield* LoggerService;
-						yield* logger.info("Deleted oversized file", { objectKey });
+						yield* logger.info("Deleted oversized file", { objectKey, jobId: jobId || undefined });
 					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 				);
 			} catch (deleteError) {
 				await Effect.runPromise(
 					Effect.gen(function* () {
 						const logger = yield* LoggerService;
-						yield* logger.error("Failed to delete oversized file", deleteError, { objectKey });
+						yield* logger.error("Failed to delete oversized file", deleteError, { objectKey, jobId: jobId || undefined });
 					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 				);
 			}
@@ -158,8 +187,7 @@ export async function handleR2Events(batch: MessageBatch<R2EventNotification>, e
 			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 		);
 
-		// Extract job ID from object key (format: inputs/{jobId}/filename)
-		const jobId = extractJobIdFromKey(objectKey);
+		// If no jobId could be extracted, skip processing
 		if (!jobId) {
 			await Effect.runPromise(
 				Effect.gen(function* () {
