@@ -8,17 +8,22 @@ title RWOS - Redis Worker Orchestration System
 
 left to right direction
 
-rectangle "**Control Plane**\nCloudflare Worker\n\n//API//\n//Admission//\n//Spawner//\n//Cron//" as CP #e3f2fd
+rectangle "**Control Plane**\nCloudflare Worker\n\n//API//\n//Queue Consumer//\n//Cron//" as CP #e3f2fd
 
-rectangle "**State Store**\nUpstash Redis\n\n//jobs:pending//\n//jobs:status//\n//machines:pool//" as SS #fff8e1
+rectangle "**State Store**\nUpstash Redis\n\n//jobs:pending (ZSET)//\n//jobs:status:* (HASH)//\n//machines:pool (HASH)//\n//counters:active_machines//" as SS #fff8e1
 
-rectangle "**Compute**\nFly.io\n\n//FFmpeg Workers//\n//Poll indefinitely//\n//Stop when idle//" as WP #fff3e0
+rectangle "**Compute**\nFly.io Machines\n\n//FFmpeg Workers//\n//Poll indefinitely//\n//Cron stops idle//" as WP #fff3e0
 
-storage "**R2**\nStorage" as R2 #f3e5f5
+storage "**R2**\nInput + Output" as R2 #f3e5f5
 
-CP --> SS : enqueue\njobs
-SS --> WP : poll\n& claim
+actor Client as C
+
+C --> R2 : presigned\nupload
+R2 ..> CP : event\nnotification
+CP --> SS : enqueue\njob
+SS --> WP : ZPOPMIN\njob
 WP --> R2 : transcode
-WP ..> CP : webhook
+WP --> SS : status\nupdate
+CP ..> WP : spawn/stop\nmachines
 
 @enduml

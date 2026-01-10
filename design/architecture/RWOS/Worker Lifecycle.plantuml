@@ -2,68 +2,68 @@
 !theme plain
 skinparam stateFontSize 12
 
-title Worker Lifecycle - Pooled Indefinite Polling
+title Worker Lifecycle - Indefinite Polling
 
-[*] --> Starting : Machine Started\n(via Machines API or Pool)
+[*] --> Starting : Machine started\n(Fly API or reused)
 
 state Starting {
     Starting : Connect to Redis
-    Starting : Read env variables
-    Starting : Initialize in pool\n(HSET machines:pool)
+    Starting : initializeWorker()
+    Starting : HSET machines:pool (running)
 }
 
-Starting --> Running : Pool Entry Created\n(state: "running")
+Starting --> Polling : Pool entry created
 
-state Running {
-    Running : Polling job queue\n(indefinitely)
-    Running : Update lastActiveAt
+state Polling {
+    Polling : ZPOPMIN jobs:pending
+    Polling : Update lastActiveAt
 }
 
-Running --> Processing : ZPOPMIN returns job
+Polling --> Processing : Job found
 
 state Processing {
     Processing : Download from R2
     Processing : FFmpeg transcode
     Processing : Upload to R2
-    Processing : Update Redis status
+    Processing : Update job status
     Processing : Send webhook
-    Processing : Update pool state\n(state: "running")
 }
 
-Processing --> Running : Job Complete\nUpdate lastActiveAt
+Processing --> Polling : Job complete\nstate = running
 
-Running --> Idle : ZPOPMIN returns null\n(no jobs available)
+Polling --> Idle : No job available
 
 state Idle {
-    Idle : Update pool state\n(state: "idle")
-    Idle : Update lastActiveAt
-    Idle : Sleep POLL_INTERVAL
+    Idle : HSET state = idle
+    Idle : Sleep POLL_INTERVAL (5s)
 }
 
-Idle --> Running : Continue polling
+Idle --> Polling : Continue polling
 
-Idle --> [*] : Stopped by Cron\n(idle > 5 minutes)\n(Machines_stop API)
+Idle --> Stopped : Cron detects\nidle > 5 min
 
-note right of Running
-  **Constants:**
-  POLL_INTERVAL = 5s
-  IDLE_TIMEOUT = 5 minutes
-  Workers poll indefinitely
-  No TTL or drain logic
+state Stopped {
+    Stopped : Fly API stop
+    Stopped : SADD machines:stopped
+    Stopped : HSET state = stopped
+}
+
+Stopped --> [*] : Available for reuse
+
+note right of Polling
+  **Poll Loop (infinite):**
+  while (true) {
+    job = ZPOPMIN
+    if (!job) { idle; sleep }
+    else { process(job) }
+  }
 end note
 
-note right of Processing
-  **Job Status Updates:**
-  pending → running → completed/failed
-  All tracked in Redis HASH
-end note
-
-note right of Idle
-  **Pool State:**
-  machines:pool tracks state
-  Cron stops idle machines
-  Stopped machines reused
+note right of Stopped
+  **Cron (every minute):**
+  Scans machines:pool
+  Stops idle > 5 min
+  Cleans stale entries
 end note
 
 @enduml
-

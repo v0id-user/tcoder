@@ -4,50 +4,47 @@ skinparam boxPadding 10
 skinparam participantPadding 8
 autonumber "<b>[0]"
 
-title Admission Control Flow - Pool-Based Capacity Management
+title Admission Control - Spawn Worker Flow
 
-participant CF as "Cloudflare Worker\n(Control Plane)"
+participant CP as "Control Plane"
 database Redis as "Upstash Redis"
 participant Fly as "Fly Machines API"
 
-== Check Stopped Machines First ==
-CF -> Redis: SPOP machines:stopped
-Redis --> CF: machine_id or null
+== Try Reuse Stopped Machine ==
+CP -> Redis: SPOP machines:stopped
+Redis --> CP: machine_id or null
 
-alt machine_id found (Reuse)
-    note right of CF: Reuse Stopped Machine
-    CF -> Fly: POST /apps/{app}/machines/{id}/start
-    Fly --> CF: Machine started
-    CF -> Redis: HSET machines:pool\n{ state: "running", lastActiveAt }
-    CF -> Redis: SREM machines:stopped
-    CF --> CF: Return { job_id, machine_id }
-else no stopped machines (Create New)
-    == Pool Capacity Check ==
-    CF -> Redis: HGETALL machines:pool
-    Redis --> CF: pool_entries (running + stopped)
+alt machine_id found
+    note right of CP: Reuse existing machine
+    CP -> Fly: POST machines/{id}/start
+    Fly --> CP: started
+    CP -> Redis: SREM machines:stopped\nHSET machines:pool (running)
+    CP --> CP: Return machine_id
+else no stopped machines
+    == Atomic Capacity Check ==
+    CP -> Redis: INCR counters:active_machines
+    Redis --> CP: slot_number
 
-    alt pool_size >= MAX_MACHINES (10)
-        note right of CF: Pool Full
-        CF --> CF: Return "queued" status\n(Job waits for existing workers)
-    else pool_size < MAX_MACHINES
-        note right of CF: Pool Capacity Available
+    alt slot > MAX_MACHINES
+        note right of CP: Capacity full
+        CP -> Redis: DECR counters:active_machines
+        CP --> CP: Return CapacityFull
+    else slot <= MAX_MACHINES
+        note right of CP: Slot acquired
 
         == Create Machine ==
-        CF -> Fly: POST /apps/{app}/machines\n(with exponential backoff)
+        CP -> Fly: POST machines/create
+        note right of Fly: Retry on 429/5xx\nwith exp backoff
 
-        alt 429 or 5xx
-            CF -> CF: Backoff and retry
-            CF -> Fly: Retry create
+        alt success
+            Fly --> CP: machine_id
+            CP -> Redis: HSET machines:pool (running)
+            CP --> CP: Return machine_id
+        else failed after retries
+            CP -> Redis: DECR counters:active_machines
+            CP --> CP: Return error
         end
-
-        Fly --> CF: { id: machine_id, state: "started" }
-
-        == Add to Pool ==
-        CF -> Redis: HSET machines:pool\n{ state: "running", lastActiveAt, createdAt }
-
-        CF --> CF: Return { job_id, machine_id }
     end
 end
 
 @enduml
-
