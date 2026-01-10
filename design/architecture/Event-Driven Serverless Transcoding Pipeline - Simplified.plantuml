@@ -1,0 +1,69 @@
+@startuml Event-Driven Serverless Transcoding Pipeline - Simplified
+!theme plain
+skinparam boxPadding 10
+skinparam participantPadding 10
+autonumber
+
+'--- Actors and Components ---
+actor Client as "User Client"
+
+box "Cloudflare Ecosystem" #e3f2fd
+    participant Worker as "Worker API"
+    database R2 as "R2 Storage"
+    participant Queue as "TRANSCODE_QUEUE"
+end box
+
+box "Orchestration" #e8f5e9
+    database Redis as "Upstash Redis"
+end box
+
+box "Compute Infrastructure" #fff3e0
+    participant Fly as "Fly.io Worker"
+end box
+
+box "Distribution" #f3e5f5
+    participant CDN as "Bunny CDN"
+end box
+
+'--- Main Flow ---
+== 1. Upload Authorization ==
+Client -> Worker: Request Upload Permission
+Worker -> R2: Generate Presigned URL
+R2 --> Worker: Signed URL
+Worker --> Client: Presigned URL + job_id
+
+== 2. Video Ingestion ==
+Client -> R2: Upload Raw Video
+R2 -> Queue: Object Created Event
+Queue -> Worker: Process Event
+
+== 3. Job Orchestration ==
+Worker -> Redis: Enqueue Job
+Worker -> Redis: Check Available Machines
+alt Machine Available
+    Worker -> Fly: Start Machine
+else No Machine Available
+    Worker -> Fly: Create New Machine
+end
+Fly --> Worker: Machine Ready
+
+== 4. Transcoding ==
+loop Polling for Jobs
+    Fly -> Redis: Get Next Job
+    alt Job Found
+        Fly -> R2: Download Raw Video
+        Fly -> Fly: FFmpeg Transcode
+        Fly -> R2: Upload Processed Videos
+        Fly -> Worker: Notify Completion
+    else No Job
+        Fly -> Fly: Sleep & Retry
+    end
+end
+
+== 5. Distribution ==
+Client -> CDN: Request Video
+CDN -> R2: Fetch from Origin
+R2 --> CDN: Video Data
+CDN --> Client: Stream Video
+
+@enduml
