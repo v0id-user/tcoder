@@ -86,14 +86,9 @@ describe("API Routes", () => {
 				const data = (await response.json()) as {
 					machines: { activeMachines: number; maxMachines: number };
 					pendingJobs: number;
-					activeJobs: number;
-					activeJobIds: string[];
 				};
 				expect(data).toHaveProperty("machines");
 				expect(data).toHaveProperty("pendingJobs");
-				expect(data).toHaveProperty("activeJobs");
-				expect(data).toHaveProperty("activeJobIds");
-				expect(Array.isArray(data.activeJobIds)).toBe(true);
 			} else {
 				// Redis unavailable - verify it's an error response
 				expect(response.status).toBe(500);

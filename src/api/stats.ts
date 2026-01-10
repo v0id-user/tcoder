@@ -66,7 +66,6 @@ const buildStatsRoutes = () => {
 				);
 
 				const pendingCount = await redis.zcard(RedisKeys.jobsPending);
-				const activeJobs = await redis.hgetall<Record<string, string>>(RedisKeys.jobsActive);
 
 				await Effect.runPromise(
 					Effect.gen(function* () {
@@ -74,7 +73,6 @@ const buildStatsRoutes = () => {
 						yield* logger.info("Job counts retrieved", {
 							requestId,
 							pendingCount,
-							activeCount: activeJobs ? Object.keys(activeJobs).length : 0,
 						});
 					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 				);
@@ -142,7 +140,6 @@ const buildStatsRoutes = () => {
 							statusCode: 200,
 							durationMs: duration,
 							pendingJobs: pendingCount,
-							activeJobs: activeJobs ? Object.keys(activeJobs).length : 0,
 							flyMachinesCount: flyMachines.length,
 							event: "request.completed",
 						});
@@ -152,8 +149,6 @@ const buildStatsRoutes = () => {
 				return c.json({
 					machines: stats,
 					pendingJobs: pendingCount,
-					activeJobs: activeJobs ? Object.keys(activeJobs).length : 0,
-					activeJobIds: activeJobs ? Object.keys(activeJobs) : [],
 					flyMachines: {
 						count: flyMachines.length,
 						machines: flyMachines.map((m) => ({

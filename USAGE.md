@@ -248,12 +248,7 @@ Response:
     "maxMachines": 5,
     "capacityAvailable": true
   },
-  "pendingJobs": 5,
-  "activeJobs": 2,
-  "activeJobIds": [
-    "550e8400-e29b-41d4-a716-446655440000",
-    "660e8400-e29b-41d4-a716-446655440001"
-  ]
+  "pendingJobs": 5
 }
 ```
 
