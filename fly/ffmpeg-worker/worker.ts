@@ -137,18 +137,62 @@ interface OutputFile {
 }
 
 // =============================================================================
+// Quality Settings
+// =============================================================================
+
+interface QualitySettings {
+	readonly resolution: string; // e.g., "256x144"
+	readonly videoBitrate: string; // e.g., "100k"
+	readonly audioBitrate: string; // e.g., "64k"
+}
+
+const QUALITY_SETTINGS: Record<VideoQuality, QualitySettings> = {
+	"144p": { resolution: "256x144", videoBitrate: "100k", audioBitrate: "64k" },
+	"360p": { resolution: "640x360", videoBitrate: "400k", audioBitrate: "96k" },
+	"720p": { resolution: "1280x720", videoBitrate: "1500k", audioBitrate: "128k" },
+};
+
+// =============================================================================
 // FFmpeg Presets
 // =============================================================================
 
-const getFFmpegArgs = (config: JobConfig, localInputPath: string, localOutputPath: string): string[] => {
+const getFFmpegArgs = (
+	config: JobConfig,
+	localInputPath: string,
+	localOutputPath: string,
+	quality?: VideoQuality,
+): string[] => {
 	const baseArgs = ["-i", localInputPath, "-y"];
+
+	// If quality is specified, add resolution and bitrate settings
+	const qualityArgs: string[] = [];
+	if (quality && QUALITY_SETTINGS[quality]) {
+		const settings = QUALITY_SETTINGS[quality];
+		qualityArgs.push("-vf", `scale=${settings.resolution}`);
+		qualityArgs.push("-b:v", settings.videoBitrate);
+		qualityArgs.push("-b:a", settings.audioBitrate);
+	}
 
 	switch (config.preset) {
 		case "web-optimized":
-			return [...baseArgs, "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "aac", "-b:a", "128k", localOutputPath];
+			return [
+				...baseArgs,
+				...qualityArgs,
+				"-c:v",
+				"libx264",
+				"-preset",
+				"fast",
+				"-crf",
+				"23",
+				"-c:a",
+				"aac",
+				...(quality ? [] : ["-b:a", "128k"]), // Only add default audio bitrate if quality not specified
+				localOutputPath,
+			];
 		case "hls":
 			return [
 				...baseArgs,
+				...qualityArgs,
 				"-c:v",
 				"libx264",
 				"-preset",
@@ -159,6 +203,7 @@ const getFFmpegArgs = (config: JobConfig, localInputPath: string, localOutputPat
 				"0",
 				"-c:a",
 				"aac",
+				...(quality ? [] : ["-b:a", "128k"]), // Only add default audio bitrate if quality not specified
 				"-hls_time",
 				"4",
 				"-hls_playlist_type",
@@ -166,6 +211,20 @@ const getFFmpegArgs = (config: JobConfig, localInputPath: string, localOutputPat
 				localOutputPath,
 			];
 		default:
+			// For "default" preset, if quality is specified, transcode; otherwise copy
+			if (quality && qualityArgs.length > 0) {
+				return [
+					...baseArgs,
+					...qualityArgs,
+					"-c:v",
+					"libx264",
+					"-preset",
+					"fast",
+					"-c:a",
+					"aac",
+					localOutputPath,
+				];
+			}
 			return [...baseArgs, "-c", "copy", localOutputPath];
 	}
 };
@@ -350,14 +409,25 @@ const processJob = (jobId: string) =>
 		const machineId = process.env.FLY_MACHINE_ID || `local-${Date.now()}`;
 
 		const result = yield* Effect.gen(function* () {
-			// Download
+			// Download input once (reused for all qualities)
 			yield* downloadInput(config.inputUrl, localInputPath);
 
-			// Transcode
-			const args = getFFmpegArgs(config, localInputPath, localOutputPaths[0]);
-			yield* runFFmpeg(args);
+			// Transcode: run FFmpeg once per quality if outputQualities is provided
+			if (config.outputQualities && config.outputQualities.length > 0) {
+				// Process each quality sequentially
+				for (let i = 0; i < config.outputQualities.length; i++) {
+					const quality = config.outputQualities[i];
+					const outputPath = localOutputPaths[i];
+					const args = getFFmpegArgs(config, localInputPath, outputPath, quality);
+					yield* runFFmpeg(args);
+				}
+			} else {
+				// Single output without quality specification
+				const args = getFFmpegArgs(config, localInputPath, localOutputPaths[0]);
+				yield* runFFmpeg(args);
+			}
 
-			// Upload
+			// Upload all outputs
 			const outputs = yield* uploadOutputs(config, localOutputPaths);
 
 			return outputs;

@@ -225,7 +225,7 @@ export const spawnWorker = (config: SpawnConfig): Effect.Effect<SpawnResult, Spa
 			name: `ffmpeg-worker-${Date.now()}`,
 			region: config.flyRegion,
 			config: {
-				image: "registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:deployment-01KEKMNM52R8K0Z9MMAGKSMQX8",
+				image: "registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:deployment-01KEKQ529MJMV08MXTAZ9ENAY1",
 				env,
 				guest: {
 					cpu_kind: "shared",

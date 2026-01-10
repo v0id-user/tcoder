@@ -185,7 +185,8 @@ describe("Job Manager", () => {
 			await mockRedis.hset(RedisKeys.jobsActive, { [job.jobId]: "machine-1" });
 
 			const outputs = [
-				{ quality: "1080p", url: "https://example.com/1080p.mp4" },
+				{ quality: "144p", url: "https://example.com/144p.mp4" },
+				{ quality: "360p", url: "https://example.com/360p.mp4" },
 				{ quality: "720p", url: "https://example.com/720p.mp4" },
 			];
 

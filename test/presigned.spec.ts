@@ -26,13 +26,13 @@ describe("R2 Key Generation", () => {
 
 	describe("generateOutputKey", () => {
 		it("generates correct output key format", () => {
-			const key = generateOutputKey("job-123", "1080p");
-			expect(key).toBe("outputs/job-123/1080p.mp4");
+			const key = generateOutputKey("job-123", "720p");
+			expect(key).toBe("outputs/job-123/720p.mp4");
 		});
 
 		it("allows custom extension", () => {
-			const key = generateOutputKey("job-123", "1080p", "m3u8");
-			expect(key).toBe("outputs/job-123/1080p.m3u8");
+			const key = generateOutputKey("job-123", "720p", "m3u8");
+			expect(key).toBe("outputs/job-123/720p.m3u8");
 		});
 	});
 
@@ -43,7 +43,7 @@ describe("R2 Key Generation", () => {
 		});
 
 		it("extracts job ID from output key", () => {
-			const jobId = extractJobIdFromKey("outputs/job-456/1080p.mp4");
+			const jobId = extractJobIdFromKey("outputs/job-456/720p.mp4");
 			expect(jobId).toBe("job-456");
 		});
 

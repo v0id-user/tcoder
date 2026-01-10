@@ -76,7 +76,8 @@ describe("Schema Serialization", () => {
 				preset: "default",
 				webhookUrl: "https://example.com/webhook",
 				outputs: [
-					{ quality: "1080p", url: "https://example.com/1080p.mp4" },
+					{ quality: "144p", url: "https://example.com/144p.mp4" },
+					{ quality: "360p", url: "https://example.com/360p.mp4" },
 					{ quality: "720p", url: "https://example.com/720p.mp4" },
 				],
 				timestamps: {
@@ -89,9 +90,10 @@ describe("Schema Serialization", () => {
 			const serialized = serializeJobData(job);
 			const deserialized = deserializeJobData(serialized);
 
-			expect(deserialized?.outputs).toHaveLength(2);
-			expect(deserialized?.outputs?.[0].quality).toBe("1080p");
-			expect(deserialized?.outputs?.[1].quality).toBe("720p");
+			expect(deserialized?.outputs).toHaveLength(3);
+			expect(deserialized?.outputs?.[0].quality).toBe("144p");
+			expect(deserialized?.outputs?.[1].quality).toBe("360p");
+			expect(deserialized?.outputs?.[2].quality).toBe("720p");
 		});
 
 		it("returns null for invalid data", () => {

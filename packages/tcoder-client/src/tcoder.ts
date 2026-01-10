@@ -20,7 +20,7 @@ export interface UploadOptions {
 	contentType?: string;
 	/** Transcoding preset */
 	preset?: "default" | "web-optimized" | "hls" | "hls-adaptive";
-	/** Output quality levels (e.g., ["480p", "720p", "1080p"]) */
+	/** Output quality levels (e.g., ["144p", "360p", "720p"]). When specified, generates separate transcoded outputs for each quality. */
 	outputQualities?: VideoQuality[];
 }
 
@@ -32,7 +32,7 @@ export interface UploadResponse {
 }
 
 export interface JobOutput {
-	/** Quality level (e.g., "480p", "720p") */
+	/** Quality level (e.g., "144p", "360p", "720p") */
 	quality: VideoQuality;
 	/** URL to the transcoded video */
 	url: string;

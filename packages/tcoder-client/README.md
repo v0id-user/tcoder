@@ -24,7 +24,7 @@ const result = await Effect.runPromise(
     filename: "video.mp4",
     contentType: "video/mp4",
     preset: "default",
-    outputQualities: ["480p", "720p", "1080p"],
+    outputQualities: ["144p", "360p", "720p"],
   })
 );
 
@@ -101,7 +101,37 @@ const client2 = new TcoderClient({
 - `filename` (required): Original filename
 - `contentType` (optional): MIME type (default: "video/mp4")
 - `preset` (optional): Transcoding preset - "default" | "web-optimized" | "hls" | "hls-adaptive" (default: "default")
-- `outputQualities` (optional): Array of quality levels, e.g., `["480p", "720p", "1080p"]`
+- `outputQualities` (optional): Array of quality levels - `["144p", "360p", "720p"]`. When specified, the transcoder will generate separate output files for each quality with appropriate resolution and bitrate settings.
+
+### Quality Options
+
+The SDK supports three quality levels:
+
+- **144p**: Low quality - 256x144 resolution, 100k video bitrate, 64k audio bitrate
+- **360p**: Medium quality - 640x360 resolution, 400k video bitrate, 96k audio bitrate  
+- **720p**: High quality - 1280x720 resolution, 1500k video bitrate, 128k audio bitrate
+
+When you specify `outputQualities`, the transcoder will:
+1. Download the input video once
+2. Generate separate transcoded outputs for each requested quality
+3. Upload each output with a quality suffix (e.g., `outputs/job-123-144p.mp4`, `outputs/job-123-360p.mp4`)
+
+Example:
+```typescript
+const result = await Effect.runPromise(
+  client.upload(videoBlob, {
+    filename: "video.mp4",
+    outputQualities: ["144p", "360p", "720p"], // Generate all three qualities
+  })
+);
+
+// When completed, status.outputs will contain:
+// [
+//   { quality: "144p", url: "https://..." },
+//   { quality: "360p", url: "https://..." },
+//   { quality: "720p", url: "https://..." }
+// ]
+```
 
 ### Job Status
 

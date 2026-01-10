@@ -33,7 +33,7 @@ interface TranscodeJob {
 	readonly apiToken: string;
 	// Required: Webhook URL for completion notification (Phase 4 - Discoverability Phase)
 	readonly webhookUrl: string;
-	// Optional: Multiple output qualities (e.g., ["480p", "720p", "1080p"])
+	// Optional: Multiple output qualities (e.g., ["144p", "360p", "720p"])
 	readonly outputQualities?: VideoQuality[];
 	// Optional: R2 configuration (if not using presigned URLs)
 	readonly r2Config?: {
@@ -88,7 +88,7 @@ const createTranscodeMachine = (job: TranscodeJob) =>
 			name: `ffmpeg-${job.jobId}`,
 			region: config.region,
 			config: {
-				image: "registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:deployment-01KEKMNM52R8K0Z9MMAGKSMQX8",
+				image: "registry.fly.io/fly-tcoder-ffmpeg-worker-31657fa:deployment-01KEKQ529MJMV08MXTAZ9ENAY1",
 				// Pass job parameters as environment variables to the machine
 				env,
 				guest: {

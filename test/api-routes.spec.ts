@@ -258,7 +258,7 @@ describe("API Routes", () => {
 				body: JSON.stringify({
 					filename: "test-video.mp4",
 					preset: "default",
-					outputQualities: ["1080p", "720p", "480p"],
+					outputQualities: ["144p", "360p", "720p"],
 				}),
 			});
 
@@ -409,7 +409,7 @@ describe("API Routes", () => {
 					inputUrl: "https://example.com/video.mp4",
 					outputUrl: "outputs/test",
 					preset: "default",
-					outputQualities: ["1080p", "720p"],
+					outputQualities: ["144p", "360p", "720p"],
 				}),
 			});
 

@@ -24,8 +24,8 @@ describe("Webhook Routes", () => {
 				inputUrl: "https://example.com/input.mp4",
 				outputs: [
 					{
-						quality: "1080p",
-						url: "https://example.com/1080p.mp4",
+						quality: "720p",
+						url: "https://example.com/720p.mp4",
 						preset: "default",
 					},
 				],
@@ -91,18 +91,18 @@ describe("Webhook Routes", () => {
 				inputUrl: "https://example.com/input.mp4",
 				outputs: [
 					{
-						quality: "1080p",
-						url: "https://example.com/1080p.mp4",
+						quality: "144p",
+						url: "https://example.com/144p.mp4",
+						preset: "default",
+					},
+					{
+						quality: "360p",
+						url: "https://example.com/360p.mp4",
 						preset: "default",
 					},
 					{
 						quality: "720p",
 						url: "https://example.com/720p.mp4",
-						preset: "default",
-					},
-					{
-						quality: "480p",
-						url: "https://example.com/480p.mp4",
 						preset: "default",
 					},
 				],
@@ -174,8 +174,8 @@ describe("Webhook Routes", () => {
 				inputUrl: "https://example.com/input.mp4",
 				outputs: [
 					{
-						quality: "1080p",
-						url: "https://example.com/1080p.mp4",
+						quality: "720p",
+						url: "https://example.com/720p.mp4",
 						preset: "default",
 					},
 				],
