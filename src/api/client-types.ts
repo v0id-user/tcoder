@@ -6,3 +6,4 @@
  */
 
 export type { AppType } from "../index";
+export type { VideoQuality } from "./quality";

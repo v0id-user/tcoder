@@ -10,6 +10,7 @@
  */
 
 import { Context, Effect } from "effect";
+import type { VideoQuality } from "../src/api/quality";
 import { LoggerService, logMachineCreated, logMachineStatus, makeLoggerLayer } from "../packages/logger";
 import { flyClient } from "./fly-client";
 import type { Components, Machine, Paths } from "./fly-machine-apis";
@@ -33,7 +34,7 @@ interface TranscodeJob {
 	// Required: Webhook URL for completion notification (Phase 4 - Discoverability Phase)
 	readonly webhookUrl: string;
 	// Optional: Multiple output qualities (e.g., ["480p", "720p", "1080p"])
-	readonly outputQualities?: string[];
+	readonly outputQualities?: VideoQuality[];
 	// Optional: R2 configuration (if not using presigned URLs)
 	readonly r2Config?: {
 		readonly accountId: string;

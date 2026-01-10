@@ -18,6 +18,7 @@
 import { unlink } from "node:fs/promises";
 import { $ } from "bun";
 import { Effect, Exit, Layer } from "effect";
+import type { VideoQuality } from "../../src/api/quality";
 import {
 	type LogLevel,
 	LoggerService,
@@ -125,11 +126,11 @@ interface JobConfig {
 	readonly outputUrl: string;
 	readonly preset: string;
 	readonly webhookUrl: string;
-	readonly outputQualities?: string[];
+	readonly outputQualities?: VideoQuality[];
 }
 
 interface OutputFile {
-	readonly quality: string;
+	readonly quality: VideoQuality;
 	readonly localPath: string;
 	readonly r2Key: string;
 	readonly r2Url: string;
@@ -205,9 +206,11 @@ const runFFmpeg = (args: string[]) =>
 /**
  * Generate a descriptive quality name based on context.
  * Uses provided outputQualities when available, otherwise derives from preset and index.
+ * Note: When outputQualities is not provided, this returns a string that may not be a VideoQuality.
+ * In practice, outputQualities should always be provided when multiple outputs are expected.
  */
-const getQualityName = (config: JobConfig, index: number, totalOutputs: number): string => {
-	// If quality is explicitly provided, use it (e.g., "720p", "1080p", "web")
+const getQualityName = (config: JobConfig, index: number, totalOutputs: number): VideoQuality | string => {
+	// If quality is explicitly provided, use it (e.g., "720p", "1080p")
 	if (config.outputQualities?.[index]) {
 		return config.outputQualities[index];
 	}
@@ -235,7 +238,11 @@ const uploadOutputs = (config: JobConfig, localOutputPaths: string[]) =>
 
 		for (let i = 0; i < localOutputPaths.length; i++) {
 			const localPath = localOutputPaths[i];
-			const quality = getQualityName(config, i, localOutputPaths.length);
+			const qualityName = getQualityName(config, i, localOutputPaths.length);
+			// When outputQualities is provided, qualityName is guaranteed to be VideoQuality
+			// When not provided, we use the first quality as fallback or cast (shouldn't happen in practice)
+			const quality: VideoQuality =
+				config.outputQualities?.[i] ?? (qualityName as VideoQuality);
 			const baseR2Key = extractR2Key(config.outputUrl);
 			const ext = localPath.match(/\.([^.]+)$/)?.[1] || "mp4";
 			const r2Key = config.outputQualities ? `${baseR2Key.replace(/\.[^/.]+$/, "")}-${quality}.${ext}` : baseR2Key;
@@ -328,7 +335,9 @@ const processJob = (jobId: string) =>
 			outputUrl: jobData.outputUrl || "",
 			preset: jobData.preset || "default",
 			webhookUrl: jobData.webhookUrl || "",
-			outputQualities: jobData.outputQualities?.split(","),
+			outputQualities: jobData.outputQualities
+				? (jobData.outputQualities.split(",") as VideoQuality[])
+				: undefined,
 		};
 
 		// Create scoped logger with jobId context

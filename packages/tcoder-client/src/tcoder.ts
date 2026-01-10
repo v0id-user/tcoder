@@ -6,6 +6,7 @@
  */
 
 import { Effect } from "effect";
+import type { VideoQuality } from "../../../src/api/client-types";
 import { type Client, createClient } from "./client";
 
 // =============================================================================
@@ -20,7 +21,7 @@ export interface UploadOptions {
 	/** Transcoding preset */
 	preset?: "default" | "web-optimized" | "hls" | "hls-adaptive";
 	/** Output quality levels (e.g., ["480p", "720p", "1080p"]) */
-	outputQualities?: string[];
+	outputQualities?: VideoQuality[];
 }
 
 export interface UploadResponse {
@@ -32,7 +33,7 @@ export interface UploadResponse {
 
 export interface JobOutput {
 	/** Quality level (e.g., "480p", "720p") */
-	quality: string;
+	quality: VideoQuality;
 	/** URL to the transcoded video */
 	url: string;
 	/** CDN URL (if configured) */

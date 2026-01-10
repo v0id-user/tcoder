@@ -13,3 +13,4 @@ export type {
 	UploadResponse,
 } from "./tcoder";
 export { UploadError, StatusError } from "./tcoder";
+export type { VideoQuality } from "../../../src/api/client-types";

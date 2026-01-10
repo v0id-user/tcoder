@@ -232,7 +232,8 @@ def main() -> None:
     parser.add_argument(
         "--qualities",
         nargs="*",
-        help="Output qualities (e.g., 720p 1080p)",
+        choices=["480p", "720p", "1080p"],
+        help="Output qualities - valid values: 480p, 720p, 1080p (e.g., --qualities 720p 1080p)",
     )
 
     parser.add_argument(

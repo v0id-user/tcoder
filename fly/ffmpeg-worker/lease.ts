@@ -6,6 +6,7 @@
  */
 
 import { Effect } from "effect";
+import type { VideoQuality } from "../../src/api/quality";
 import { LoggerService, logLeaseCleanup, logLeaseInitialized, logLeaseStateUpdate } from "../../packages/logger";
 import { type RedisError, RedisService, redisEffect } from "./redis-client";
 
@@ -331,7 +332,7 @@ export const getJobData = (jobId: string): Effect.Effect<Record<string, string> 
  * Job output structure for persistence.
  */
 export interface JobOutput {
-	readonly quality: string;
+	readonly quality: VideoQuality;
 	readonly url: string;
 }
 

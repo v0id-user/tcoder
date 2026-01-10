@@ -5,6 +5,8 @@
  * All keys follow a consistent naming convention for easy management.
  */
 
+import type { VideoQuality } from "../api/quality";
+
 // =============================================================================
 // Key Builders
 // =============================================================================
@@ -58,7 +60,7 @@ export interface JobTimestamps {
 }
 
 export interface JobOutput {
-	readonly quality: string;
+	readonly quality: VideoQuality;
 	readonly url: string;
 	readonly size?: number;
 }
@@ -72,7 +74,7 @@ export interface JobData {
 	readonly outputUrl: string; // Base output path
 	readonly preset: string;
 	readonly webhookUrl: string;
-	readonly outputQualities?: string[];
+	readonly outputQualities?: VideoQuality[];
 	readonly outputs?: JobOutput[]; // Completed output files
 	readonly filename?: string; // Original filename
 	readonly contentType?: string;
@@ -208,7 +210,9 @@ export const deserializeJobData = (data: Record<string, string | null>): JobData
 		outputUrl: data.outputUrl || "",
 		preset: data.preset || "default",
 		webhookUrl: data.webhookUrl || "",
-		outputQualities: data.outputQualities ? data.outputQualities.split(",") : undefined,
+		outputQualities: data.outputQualities
+			? (data.outputQualities.split(",") as VideoQuality[])
+			: undefined,
 		outputs: safeParseJson<JobOutput[]>(data.outputs as string | JobOutput[] | null),
 		filename: data.filename || undefined,
 		contentType: data.contentType || undefined,

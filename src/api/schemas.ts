@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { VIDEO_QUALITIES } from "./quality";
 
 export const uploadRequestSchema = z.object({
 	filename: z.string().min(1),
 	contentType: z.string().optional().default("video/mp4"),
 	preset: z.enum(["default", "web-optimized", "hls", "hls-adaptive"]).default("default"),
-	outputQualities: z.array(z.string()).optional(),
+	outputQualities: z.array(z.enum(VIDEO_QUALITIES as [string, ...string[]])).optional(),
 });
 
 export const submitJobSchema = z.object({
@@ -12,7 +13,7 @@ export const submitJobSchema = z.object({
 	inputUrl: z.string().url(),
 	outputUrl: z.string(),
 	preset: z.enum(["default", "web-optimized", "hls", "hls-adaptive"]).default("default"),
-	outputQualities: z.array(z.string()).optional(),
+	outputQualities: z.array(z.enum(VIDEO_QUALITIES as [string, ...string[]])).optional(),
 	r2Config: z
 		.object({
 			accountId: z.string(),
@@ -30,7 +31,7 @@ export const webhookPayloadSchema = z.object({
 	inputUrl: z.string(),
 	outputs: z.array(
 		z.object({
-			quality: z.string(),
+			quality: z.enum(VIDEO_QUALITIES as [string, ...string[]]),
 			url: z.string(),
 			preset: z.string(),
 		}),

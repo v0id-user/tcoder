@@ -7,6 +7,7 @@
  */
 
 import { Context, Effect, Layer, Schedule, pipe } from "effect";
+import type { VideoQuality } from "../../src/api/quality";
 import { LoggerService, logWebhookError, logWebhookNotification } from "../../packages/logger";
 import { createClient } from "./client";
 
@@ -16,7 +17,7 @@ export interface WebhookPayload {
 	readonly status: "completed" | "failed";
 	readonly inputUrl: string;
 	readonly outputs: Array<{
-		readonly quality: string;
+		readonly quality: VideoQuality;
 		readonly url: string;
 		readonly preset: string;
 	}>;
