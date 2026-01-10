@@ -1,54 +1,24 @@
 @startuml Redis Worker Orchestration System
 !theme plain
-skinparam componentStyle rectangle
-skinparam linetype ortho
-skinparam maxMessageSize 50
-skinparam packageStyle rectangle
+skinparam defaultTextAlignment center
+skinparam padding 15
+skinparam nodesep 60
 
 title RWOS - Redis Worker Orchestration System
 
-' Top: Control Plane (grouped horizontally)
-package "Control Plane" #e3f2fd {
-    [Hono API] as API
-    [Admission\nController] as AdmCtrl
-    [Machine\nSpawner] as Spawner
-    [Cron\nHandler] as Cron
-}
+left to right direction
 
-' Middle: Redis State (grouped in columns)
-package "Redis State Store" #fff8e1 {
-    database "jobs:pending" as JobQueue
-    database "jobs:active" as ActiveJobs
-    database "jobs:status" as JobStatus
-    database "machines:pool" as MachinePool
-    database "machines:stopped" as StoppedMachines
-}
+rectangle "**Control Plane**\nCloudflare Worker\n\n//API//\n//Admission//\n//Spawner//\n//Cron//" as CP #e3f2fd
 
-' Bottom: Execution Layer
-package "Execution Layer" #fff3e0 {
-    node "Worker\n(Poll Indefinitely)" as W1
-}
+rectangle "**State Store**\nUpstash Redis\n\n//jobs:pending//\n//jobs:status//\n//machines:pool//" as SS #fff8e1
 
-cloud "R2 Storage" as R2 #f3e5f5
+rectangle "**Compute**\nFly.io\n\n//FFmpeg Workers//\n//Poll indefinitely//\n//Stop when idle//" as WP #fff3e0
 
-' Job Submission Flow (vertical, top to bottom)
-API --> JobQueue : "1. Enqueue"
-API --> AdmCtrl : "2. Check"
-AdmCtrl --> MachinePool : "3. Check Pool Size"
-AdmCtrl --> StoppedMachines : "4. Check Stopped"
-AdmCtrl --> Spawner : "5. Spawn/Start"
-Spawner --> W1 : "6. Create/Start"
+storage "**R2**\nStorage" as R2 #f3e5f5
 
-' Worker Processing Flow (bottom to top)
-W1 --> MachinePool : "7. Update State\n(running/idle)"
-W1 --> JobQueue : "8. Pop"
-W1 --> ActiveJobs : "9. Claim"
-W1 --> JobStatus : "10. Update"
-W1 --> R2 : "11. Storage"
-W1 --> API : "12. Webhook"
-
-' Maintenance Flow
-Cron --> MachinePool : "Stop Idle\n(idle > 5min)"
-Cron --> StoppedMachines : "Add to Stopped"
+CP --> SS : enqueue\njobs
+SS --> WP : poll\n& claim
+WP --> R2 : transcode
+WP ..> CP : webhook
 
 @enduml
