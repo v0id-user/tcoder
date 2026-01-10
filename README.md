@@ -4,6 +4,10 @@ Implementation of an event-driven, serverless video transcoding pipeline. Compos
 
 This is a personal side project built to explore architectural tradeoffs in distributed orchestration, backpressure handling, and worker lifecycle management. It is not intended for production use.
 
+**Demo Site**: [https://tcoder-web.cloudflare-c49.workers.dev/](https://tcoder-web.cloudflare-c49.workers.dev/)
+
+**Blog Post**: [I tried to understand how large-scale video pipelines work, so I built a serverless transcoding system](https://v0id-user.mataroa.blog/blog/i-tried-to-understand-how-large-scale-video-pipelines-work-so-i-built-a-serverless-transcoding-system-cloudflare-flyio-redis/)
+
 ## Architecture
 
 Three-layer separation: control plane, state store, and compute plane. Each layer has distinct responsibilities and failure boundaries.
