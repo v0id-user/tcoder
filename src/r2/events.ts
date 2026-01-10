@@ -61,6 +61,7 @@ export interface Env {
 	WEBHOOK_BASE_URL: string;
 	R2_ACCOUNT_ID: string;
 	R2_INPUT_BUCKET_NAME: string;
+	INPUT_BUCKET: R2Bucket;
 }
 
 // =============================================================================
@@ -111,10 +112,49 @@ export async function handleR2Events(batch: MessageBatch<R2EventNotification>, e
 		}
 
 		const objectKey = event.object.key;
+		const objectSize = event.object.size;
+		const maxSizeBytes = 350 * 1024 * 1024; // 350MB
+
+		// Check if file exceeds size limit
+		if (objectSize > maxSizeBytes) {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const logger = yield* LoggerService;
+					yield* logger.warn("File exceeds size limit, deleting", {
+						objectKey,
+						size: objectSize,
+						sizeMB: Math.round((objectSize / 1024 / 1024) * 100) / 100,
+						maxSizeMB: 350,
+					});
+				}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+			);
+
+			// Delete the oversized file
+			try {
+				await env.INPUT_BUCKET.delete(objectKey);
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const logger = yield* LoggerService;
+						yield* logger.info("Deleted oversized file", { objectKey });
+					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+				);
+			} catch (deleteError) {
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const logger = yield* LoggerService;
+						yield* logger.error("Failed to delete oversized file", deleteError, { objectKey });
+					}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
+				);
+			}
+
+			message.ack();
+			continue;
+		}
+
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const logger = yield* LoggerService;
-				yield* logger.info("Processing upload event", { objectKey, size: event.object.size });
+				yield* logger.info("Processing upload event", { objectKey, size: objectSize });
 			}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 		);
 
