@@ -293,6 +293,6 @@ curl -X POST "https://tcoder.your-subdomain.workers.dev/webhooks/job-complete" \
 
 Jobs stuck in `uploading` status are automatically recovered:
 
-- After ~65 minutes, system checks if file exists in R2
+- After ~5 minutes, system checks if file exists in R2
 - If file exists: job transitions to `pending`
-- If file missing after ~2 hours: job marked as `failed`
+- If file missing after ~20 minutes: job marked as `failed`

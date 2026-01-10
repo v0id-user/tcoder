@@ -277,13 +277,19 @@ async function recoverStuckUploadingJobs(env: Env) {
 	const effectLoggerLayer = makeEffectLoggerLayer("info");
 	const now = Date.now();
 
-	// Calculate recovery threshold: presigned URL expiry + buffer
-	const recoveryThresholdMs = (RWOS_CONFIG.PRESIGNED_URL_EXPIRY_SECONDS + RWOS_CONFIG.UPLOADING_RECOVERY_BUFFER_SECONDS) * 1000;
+	// Calculate recovery threshold: early proactive check (don't wait for presigned URL expiry)
+	const recoveryThresholdMs = RWOS_CONFIG.UPLOADING_RECOVERY_CHECK_SECONDS * 1000;
+	const failureThresholdMs = RWOS_CONFIG.UPLOADING_FAILURE_THRESHOLD_SECONDS * 1000;
 
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			const logger = yield* LoggerService;
-			yield* logger.info("Checking for stuck uploading jobs", { recoveryThresholdMs });
+			yield* logger.info("Checking for stuck uploading jobs", {
+				recoveryThresholdMs,
+				recoveryThresholdSeconds: RWOS_CONFIG.UPLOADING_RECOVERY_CHECK_SECONDS,
+				failureThresholdMs,
+				failureThresholdSeconds: RWOS_CONFIG.UPLOADING_FAILURE_THRESHOLD_SECONDS,
+			});
 		}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 	);
 
@@ -369,16 +375,15 @@ async function recoverStuckUploadingJobs(env: Env) {
 				if (recovered) {
 					recoveredCount++;
 				} else {
-					// File doesn't exist - check if job is very old (presumed failed upload)
-					const veryOldThreshold = recoveryThresholdMs * 2; // 2x the recovery threshold
-					if (jobAge > veryOldThreshold) {
+					// File doesn't exist - check if job exceeds failure threshold
+					if (jobAge > failureThresholdMs) {
 						await Effect.runPromise(
 							Effect.gen(function* () {
 								const logger = yield* LoggerService;
-								yield* logger.warn("Job is very old and file not found, marking as failed", {
+								yield* logger.warn("Job exceeds failure threshold and file not found, marking as failed", {
 									jobId,
 									jobAgeSeconds: Math.round(jobAge / 1000),
-									veryOldThresholdSeconds: Math.round(veryOldThreshold / 1000),
+									failureThresholdSeconds: RWOS_CONFIG.UPLOADING_FAILURE_THRESHOLD_SECONDS,
 								});
 							}).pipe(Effect.provide(loggerLayer), Effect.provide(effectLoggerLayer)),
 						);

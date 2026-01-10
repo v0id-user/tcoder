@@ -7,9 +7,9 @@
 	"observability": {
 		"enabled": true
 	},
-	// Cron trigger for stale job recovery (every 5 minutes)
+	// Cron trigger for stale job recovery (every 1 minute)
 	"triggers": {
-		"crons": ["*/5 * * * *"]
+		"crons": ["* * * * *"]
 	},
 	// Environment variables
 	"vars": {

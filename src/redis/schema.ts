@@ -128,8 +128,14 @@ export const RWOS_CONFIG = {
 	/** Presigned URL expiry (1 hour) */
 	PRESIGNED_URL_EXPIRY_SECONDS: 3600,
 
-	/** Buffer time after presigned URL expiry before recovery kicks in (5 minutes) */
-	UPLOADING_RECOVERY_BUFFER_SECONDS: 300,
+	/** Buffer time after presigned URL expiry before recovery kicks in (1 minute) */
+	UPLOADING_RECOVERY_BUFFER_SECONDS: 60,
+
+	/** Early recovery check: when to first check if uploaded file exists (5 minutes) */
+	UPLOADING_RECOVERY_CHECK_SECONDS: 300,
+
+	/** Failure threshold: when to mark upload as failed if file still missing (20 minutes) */
+	UPLOADING_FAILURE_THRESHOLD_SECONDS: 1200,
 
 	/** Maximum worker failures before marking worker as failed */
 	MAX_WORKER_FAILURES: 3,
