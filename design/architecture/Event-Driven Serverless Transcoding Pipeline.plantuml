@@ -11,6 +11,7 @@ actor Client as "User Client"
 box "Cloudflare Ecosystem" #e3f2fd
     participant Worker as "Worker API\n(Control Plane)"
     database R2 as "R2 Storage"
+    participant Queue as "TRANSCODE_QUEUE"
 end box
 
 box "Orchestration" #e8f5e9
@@ -31,17 +32,18 @@ Client -> Worker: Request Upload Permission
 activate Worker
 Worker -> R2: Generate Presigned PUT URL
 R2 --> Worker: Return Signed URL
-Worker --> Client: Forward Presigned URL
+Worker --> Client: Forward Presigned URL\n+ job_id
 deactivate Worker
 
 '--- 2. Ingestion Phase ---
 == 2. Ingestion Phase ==
 Client -> R2: Direct Upload (Raw Video)
-R2 -[#blue]> Worker: Event Notification (Object Created)
+R2 -> Queue: Event Notification\n(Object Created)
+Queue -> Worker: Queue Consumer\n(batch processing)
+activate Worker
 
 '--- 3. Job Orchestration Phase (RWOS) ---
 == 3. Job Orchestration Phase ==
-activate Worker
 Worker -> Redis: ZADD jobs:pending (enqueue job)
 Worker -> Redis: SPOP machines:stopped (check stopped machines)
 alt Stopped Machine Available
@@ -51,17 +53,24 @@ alt Stopped Machine Available
     Worker -> Redis: HSET machines:pool {state: "running"}
     Worker -> Redis: SREM machines:stopped
 else No Stopped Machines
-    Worker -> Redis: HGETALL machines:pool (check pool size)
-    alt Pool Size < MAX_MACHINES (10)
-        Worker -> Fly: Create Machine via Machines API
+    Worker -> Redis: INCR counters:active_machines (atomic slot)
+    Redis --> Worker: slot_number
+    alt slot > MAX_MACHINES
+        note right of Worker: Capacity full
+        Worker -> Redis: DECR counters:active_machines
+        Worker --> Worker: Job stays queued\nfor existing workers
+    else slot <= MAX_MACHINES
+        Worker -> Fly: Create Machine via Machines API\n(with retry on 429/5xx)
         activate Fly
-        Fly --> Worker: machine_id
-        Worker -> Redis: HSET machines:pool {state: "running"}
-    else Pool Full
-        Worker --> Worker: Job stays queued for existing workers
+        alt success
+            Fly --> Worker: machine_id
+            Worker -> Redis: HSET machines:pool {state: "running"}
+        else failed after retries
+            Worker -> Redis: DECR counters:active_machines
+            Worker --> Worker: Job stays queued
+        end
     end
 end
-Worker --> Client: Return job_id + status
 deactivate Worker
 
 '--- 4. Processing Phase (Indefinite Polling) ---
@@ -76,7 +85,7 @@ loop Indefinitely (until stopped externally)
         Fly -> Fly: FFmpeg Transcode\n(480p, 720p, 1080p)
         Fly -> R2: Upload Processed Qualities
         Fly -> Redis: HSET jobs:status (completed)
-        Fly -> Worker: Webhook: Job Complete
+        Fly -> Worker: POST /webhooks/job-complete\n(HTTP webhook)
     else No Jobs Available
         Fly -> Redis: HSET machines:pool {state: "idle", lastActiveAt}
         Fly -> Fly: Sleep POLL_INTERVAL (5s)
@@ -86,10 +95,9 @@ deactivate Fly
 
 '--- 5. Discoverability Phase ---
 == 5. Discoverability Phase ==
-note over Worker, Client: Client becomes aware of the new URLs
 activate Worker
-Worker -> Worker: Update Video Status in DB
-Worker -->> Client: Push Notification / WebSocket (Video Ready)
+Worker -> Redis: HSET jobs:status\n(update with outputs)
+note over Worker, Client: Client polls API for status\nor receives webhook at their endpoint
 deactivate Worker
 
 '--- 6. Distribution Phase ---
