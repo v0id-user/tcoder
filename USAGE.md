@@ -1,22 +1,19 @@
-# API Usage Guide - CURL Examples
+# API Usage Guide
 
-This guide provides practical CURL examples for testing the TCoder transcoding API.
+CURL examples for the TCoder transcoding API.
 
 ## Base URL
 
-Replace `https://tcoder.your-subdomain.workers.dev` with your actual Cloudflare Worker URL in all examples below.
-
----
+Replace `https://tcoder.your-subdomain.workers.dev` with your actual Cloudflare Worker URL.
 
 ## 1. Health Check
-
-Test if the service is running.
 
 ```bash
 curl -X GET "https://tcoder.your-subdomain.workers.dev/"
 ```
 
-**Response:**
+Response:
+
 ```json
 {
   "status": "ok",
@@ -24,17 +21,16 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/"
 }
 ```
 
----
-
 ## 2. Status Endpoint
 
-External status endpoint that hits Redis and returns server time. Useful for monitoring and verifying Redis connectivity.
+Verifies Redis connectivity and returns server time.
 
 ```bash
 curl -X GET "https://tcoder.your-subdomain.workers.dev/api/status"
 ```
 
-**Response (success):**
+Response (success):
+
 ```json
 {
   "status": "ok",
@@ -51,15 +47,12 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/api/status"
 }
 ```
 
-**Response (Redis error):**
+Response (Redis error):
+
 ```json
 {
   "status": "error",
-  "serverTime": {
-    "timestamp": 1703510400000,
-    "iso": "2023-12-25T12:00:00.000Z",
-    "utc": "Mon, 25 Dec 2023 12:00:00 GMT"
-  },
+  "serverTime": { ... },
   "redis": {
     "connected": false,
     "error": "Connection timeout"
@@ -67,27 +60,11 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/api/status"
 }
 ```
 
-**Response Fields:**
-- `status`: `"ok"` if Redis connection succeeds, `"error"` otherwise
-- `serverTime.timestamp`: Unix timestamp in milliseconds
-- `serverTime.iso`: ISO 8601 formatted date string
-- `serverTime.utc`: UTC formatted date string
-- `redis.connected`: Boolean indicating Redis connectivity
-- `redis.ping`: Response from Redis PING command (usually `"PONG"`)
-- `redis.testRead`: Boolean indicating successful read/write test (only present on success)
-- `redis.error`: Error message if Redis connection fails (only present on error)
-
-**Note:** This endpoint performs actual Redis operations (PING, SET, GET, DEL) to verify connectivity and functionality. The server time is always returned regardless of Redis status.
-
----
-
 ## 3. Upload Flow
 
-Complete workflow for uploading a video file and transcoding it.
+Complete workflow for uploading and transcoding a video file.
 
 ### Step 1: Request Presigned Upload URL
-
-Request a presigned URL to upload your video file directly to R2.
 
 ```bash
 curl -X POST "https://tcoder.your-subdomain.workers.dev/api/upload" \
@@ -100,13 +77,14 @@ curl -X POST "https://tcoder.your-subdomain.workers.dev/api/upload" \
   }'
 ```
 
-**Request Parameters:**
+Request parameters:
 - `filename` (required): Name of the file to upload
 - `contentType` (optional): MIME type, defaults to `"video/mp4"`
-- `preset` (optional): Transcoding preset - `"default"`, `"web-optimized"`, `"hls"`, or `"hls-adaptive"`. Defaults to `"default"`
-- `outputQualities` (optional): Array of output quality strings (e.g., `["720p", "1080p"]`)
+- `preset` (optional): `"default"`, `"web-optimized"`, `"hls"`, or `"hls-adaptive"`
+- `outputQualities` (optional): Array like `["720p", "1080p"]`
 
-**Response:**
+Response:
+
 ```json
 {
   "jobId": "550e8400-e29b-41d4-a716-446655440000",
@@ -116,31 +94,24 @@ curl -X POST "https://tcoder.your-subdomain.workers.dev/api/upload" \
 }
 ```
 
-**Note:** The presigned URL expires in 1 hour (3600 seconds).
+The presigned URL expires in 1 hour.
 
 ### Step 2: Upload File to R2
 
-Upload your video file using the presigned URL from Step 1. Use `PUT` method with the file content.
-
 ```bash
-curl -X PUT "https://xxx.r2.cloudflarestorage.com/tcoder-input/inputs/550e8400.../my-video.mp4?X-Amz-Algorithm=..." \
+curl -X PUT "UPLOAD_URL_FROM_STEP_1" \
   -H "Content-Type: video/mp4" \
   --data-binary @my-video.mp4
 ```
 
-**Note:** Replace the URL with the `uploadUrl` from Step 1 response, and `@my-video.mp4` with the path to your video file. The `Content-Type` header should match the `contentType` you specified in Step 1.
-
 ### Step 3: Check Job Status
-
-After uploading, check the job status. The job will automatically transition from `uploading` → `queued` → `pending` → `running` → `completed` (or `failed`).
 
 ```bash
 curl -X GET "https://tcoder.your-subdomain.workers.dev/api/jobs/550e8400-e29b-41d4-a716-446655440000"
 ```
 
-**Note:** Replace `550e8400-e29b-41d4-a716-446655440000` with the `jobId` from Step 1. Run this command multiple times to check status until the job completes.
+Response (running):
 
-**Response (while processing):**
 ```json
 {
   "jobId": "550e8400-e29b-41d4-a716-446655440000",
@@ -159,7 +130,8 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/api/jobs/550e8400-e29b-41
 }
 ```
 
-**Response (completed):**
+Response (completed):
+
 ```json
 {
   "jobId": "550e8400-e29b-41d4-a716-446655440000",
@@ -188,7 +160,8 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/api/jobs/550e8400-e29b-41
 }
 ```
 
-**Response (failed):**
+Response (failed):
+
 ```json
 {
   "jobId": "550e8400-e29b-41d4-a716-446655440000",
@@ -196,25 +169,15 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/api/jobs/550e8400-e29b-41
   "machineId": null,
   "outputs": null,
   "error": "Transcoding failed: invalid video format",
-  "timestamps": {
-    "createdAt": 1703516400000,
-    "uploadedAt": 1703516401000,
-    "queuedAt": 1703516402000,
-    "startedAt": 1703516403000,
-    "completedAt": 1703516500000
-  },
+  "timestamps": { ... },
   "filename": "my-video.mp4",
   "preset": "web-optimized"
 }
 ```
 
-**Note:** Run this command repeatedly to check job status. The job will transition through statuses until it reaches `completed` or `failed`.
-
----
-
 ## 4. Direct Job Submission
 
-Submit a transcoding job with an existing input URL (skip the upload step).
+Submit a transcoding job with an existing input URL (skip upload).
 
 ```bash
 curl -X POST "https://tcoder.your-subdomain.workers.dev/api/jobs" \
@@ -235,15 +198,16 @@ curl -X POST "https://tcoder.your-subdomain.workers.dev/api/jobs" \
   }'
 ```
 
-**Request Parameters:**
-- `jobId` (optional): Custom job ID (UUID). If omitted, a new UUID is generated
+Request parameters:
+- `jobId` (optional): Custom job ID (UUID)
 - `inputUrl` (required): Full URL to the input video file
-- `outputUrl` (required): Base path for output files (e.g., `"outputs/my-job"`)
-- `preset` (optional): Transcoding preset - `"default"`, `"web-optimized"`, `"hls"`, or `"hls-adaptive"`. Defaults to `"default"`
-- `outputQualities` (optional): Array of output quality strings
-- `r2Config` (optional): R2 credentials for output storage. If omitted, uses default worker R2 config
+- `outputUrl` (required): Base path for output files
+- `preset` (optional): Transcoding preset
+- `outputQualities` (optional): Array of quality strings
+- `r2Config` (optional): R2 credentials for output storage
 
-**Response:**
+Response:
+
 ```json
 {
   "jobId": "550e8400-e29b-41d4-a716-446655440000",
@@ -253,46 +217,30 @@ curl -X POST "https://tcoder.your-subdomain.workers.dev/api/jobs" \
 }
 ```
 
-**Note:** The job is immediately queued and a worker will be spawned if capacity is available.
+## 5. Job Status Flow
 
----
-
-## 5. Job Status Polling
-
-Check the status of any job by its ID.
-
-```bash
-curl -X GET "https://tcoder.your-subdomain.workers.dev/api/jobs/550e8400-e29b-41d4-a716-446655440000"
 ```
-
-**Response:** See Step 3 of the Upload Flow section above for example responses.
-
-**Job Status Flow:**
-```
-uploading → queued → pending → running → completed
-                                      → failed
+uploading -> queued -> pending -> running -> completed
+                                          -> failed
 ```
 
 | Status | Description |
 |--------|-------------|
-| `uploading` | Presigned URL generated, waiting for upload. Automatically recovered if file is uploaded but event notification is delayed |
+| `uploading` | Presigned URL generated, waiting for upload |
 | `queued` | Upload complete, event received |
 | `pending` | In job queue, waiting for worker |
 | `running` | Worker processing |
 | `completed` | Done, outputs available |
 | `failed` | Error occurred |
 
----
-
 ## 6. System Stats
-
-Get system statistics including active machines, pending jobs, and active jobs.
 
 ```bash
 curl -X GET "https://tcoder.your-subdomain.workers.dev/api/stats"
 ```
 
-**Response:**
+Response:
+
 ```json
 {
   "machines": {
@@ -309,19 +257,9 @@ curl -X GET "https://tcoder.your-subdomain.workers.dev/api/stats"
 }
 ```
 
-**Response Fields:**
-- `machines.activeMachines`: Number of currently active Fly.io machines
-- `machines.maxMachines`: Maximum allowed concurrent machines (default: 5)
-- `machines.capacityAvailable`: Whether new machines can be spawned
-- `pendingJobs`: Number of jobs waiting in the queue
-- `activeJobs`: Number of jobs currently being processed
-- `activeJobIds`: Array of job IDs currently being processed
-
----
-
 ## 7. Webhook Endpoint
 
-Receive job completion notifications (for testing webhook integration).
+Internal endpoint called by Fly.io workers on job completion.
 
 ```bash
 curl -X POST "https://tcoder.your-subdomain.workers.dev/webhooks/job-complete" \
@@ -341,68 +279,25 @@ curl -X POST "https://tcoder.your-subdomain.workers.dev/webhooks/job-complete" \
   }'
 ```
 
-**Request Parameters:**
-- `jobId` (required): Job ID
-- `status` (required): `"completed"` or `"failed"`
-- `inputUrl` (required): Full URL to the input file
-- `outputs` (required): Array of output objects with `quality`, `url`, and `preset`
-- `error` (optional): Error message if status is `"failed"`
-- `duration` (optional): Processing duration in seconds
-
-**Response:**
-```json
-{
-  "received": true
-}
-```
-
-**Note:** This endpoint is typically called by Fly.io workers, not by clients. It updates the job status in Redis and removes the job from the active jobs list.
-
----
-
 ## Error Responses
 
-All endpoints may return error responses:
-
-**404 Not Found:**
 ```json
-{
-  "error": "Job not found"
-}
+{ "error": "Job not found" }           // 404
+{ "error": "Invalid job data" }        // 500
+{ "error": "Validation failed", "details": "..." }  // 400
 ```
-
-**500 Internal Server Error:**
-```json
-{
-  "error": "Invalid job data"
-}
-```
-
-**400 Bad Request:**
-```json
-{
-  "error": "Validation failed",
-  "details": "..."
-}
-```
-
----
 
 ## Notes
 
-- Presigned URLs expire after 1 hour (3600 seconds)
-- Job status is retained for 24 hours after creation
-- Maximum retries for failed jobs: 3
+- Presigned URLs expire after 1 hour
+- Job status retained for 24 hours
+- Maximum retries: 3
 - Maximum concurrent machines: 5 (configurable)
-- Rate limit: 1 request per second for Fly API operations
-- Check job status periodically by running the GET job status command multiple times
 
 ### Automatic Recovery
 
-The system includes automatic recovery for jobs stuck in `"uploading"` status:
+Jobs stuck in `uploading` status are automatically recovered:
 
-- **Recovery Window**: If a file is uploaded but the R2 event notification is delayed or lost, the system will automatically detect and recover the job after the presigned URL expiry time plus a 5-minute buffer (approximately 65 minutes after job creation)
-- **File Verification**: The recovery process checks if the file actually exists in R2 before transitioning the job to `"pending"` status
-- **Failed Upload Handling**: Jobs that remain in `"uploading"` status for more than 2x the recovery threshold (approximately 2 hours) without a corresponding file in R2 will be automatically marked as `"failed"` with the error message "Upload never completed (file not found after extended wait)"
-- **No Action Required**: This recovery happens automatically in the background - you don't need to take any action if a job appears stuck in `"uploading"` status
-
+- After ~65 minutes, system checks if file exists in R2
+- If file exists: job transitions to `pending`
+- If file missing after ~2 hours: job marked as `failed`
