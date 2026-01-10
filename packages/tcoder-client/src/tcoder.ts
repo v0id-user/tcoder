@@ -35,6 +35,8 @@ export interface JobOutput {
 	quality: string;
 	/** URL to the transcoded video */
 	url: string;
+	/** CDN URL (if configured) */
+	cdnUrl?: string;
 }
 
 export interface JobStatus {
