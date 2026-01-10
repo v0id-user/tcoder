@@ -1,6 +1,6 @@
 {
 	"name": "tcoder-client",
-	"version": "0.1.2",
+	"version": "0.1.3",
 	"module": "src/index.ts",
 	"type": "module",
 	"main": "src/index.ts",

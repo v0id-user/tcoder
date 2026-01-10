@@ -108,7 +108,7 @@ const client2 = new TcoderClient({
 The SDK supports three quality levels:
 
 - **144p**: Low quality - 256x144 resolution, 100k video bitrate, 64k audio bitrate
-- **360p**: Medium quality - 640x360 resolution, 400k video bitrate, 96k audio bitrate  
+- **360p**: Medium quality - 640x360 resolution, 400k video bitrate, 96k audio bitrate
 - **720p**: High quality - 1280x720 resolution, 1500k video bitrate, 128k audio bitrate
 
 When you specify `outputQualities`, the transcoder will:
