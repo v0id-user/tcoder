@@ -40,7 +40,7 @@ R2 object creation events drive the pipeline. Uploads trigger queue messages, wh
 
 6. **Completion**: Machine sends webhook to Worker API with job results. Worker updates Redis job status. Client polls status endpoint or receives webhook callback.
 
-7. **Machine Lifecycle**: Idle machines remain in pool. Cron job stops machines idle beyond threshold. Stopped machines can be restarted for new jobs.
+7. **Machine Lifecycle**: Idle machines remain in pool. Scheduled cron job stops machines idle beyond threshold and recovers stuck uploading jobs. Stopped machines can be restarted for new jobs.
 
 ## Quick Start
 
