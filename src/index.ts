@@ -23,13 +23,16 @@ import { RWOS_CONFIG, RedisKeys, deserializeJobData, deserializeMachinePoolEntry
 // Chain routes directly for proper RPC type inference
 // See: https://hono.dev/docs/guides/best-practices#if-you-want-to-use-rpc-features
 const routes = new Hono()
-	.use("*", cors({
-		origin: "*",
-		allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-		allowHeaders: ["Content-Type", "Authorization"],
-		exposeHeaders: ["Content-Type"],
-		credentials: false,
-	}))
+	.use(
+		"*",
+		cors({
+			origin: "*",
+			allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+			allowHeaders: ["Content-Type", "Authorization"],
+			exposeHeaders: ["Content-Type"],
+			credentials: false,
+		}),
+	)
 	.get("/", (c) => c.json({ status: "ok", service: "tcoder" }))
 	.route("/api", createRoutes())
 	.route("/", createWebhookRoutes());
@@ -208,13 +211,7 @@ async function handleScheduled(env: Env) {
 				stoppedCount++;
 			} catch (e) {
 				// Check if error is 404 (machine not found) - clean up stale Redis entry
-				const is404 =
-					e &&
-					typeof e === "object" &&
-					"_tag" in e &&
-					e._tag === "HttpError" &&
-					"status" in e &&
-					e.status === 404;
+				const is404 = e && typeof e === "object" && "_tag" in e && e._tag === "HttpError" && "status" in e && e.status === 404;
 
 				if (is404) {
 					// Machine doesn't exist in Fly, clean up stale Redis entry

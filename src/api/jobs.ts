@@ -50,9 +50,7 @@ const transformOutputUrl = (r2Url: string, env: Env): { url: string; cdnUrl?: st
 		const publicUrl = `${publicUrlBase}/${key}`;
 
 		// Build CDN URL if configured
-		const cdnUrl = env.BUNNY_CDN_URL
-			? `${env.BUNNY_CDN_URL.replace(/\/$/, "")}/${key}`
-			: undefined;
+		const cdnUrl = env.BUNNY_CDN_URL ? `${env.BUNNY_CDN_URL.replace(/\/$/, "")}/${key}` : undefined;
 
 		return { url: publicUrl, ...(cdnUrl && { cdnUrl }) };
 	} catch {

@@ -413,10 +413,7 @@ export function createTestLayers(mockRedis: MockRedis = new MockRedis()) {
 /**
  * Run an Effect program with mock Redis and Logger layers
  */
-export async function runWithMockRedis<T, E, R>(
-	program: Effect.Effect<T, E, R>,
-	mockRedis?: MockRedis,
-): Promise<T> {
+export async function runWithMockRedis<T, E, R>(program: Effect.Effect<T, E, R>, mockRedis?: MockRedis): Promise<T> {
 	const layer = createTestLayers(mockRedis);
 	return Effect.runPromise(program.pipe(Effect.provide(layer as Layer.Layer<R>)));
 }

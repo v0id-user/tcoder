@@ -83,10 +83,7 @@ const incrementWorkerFailureCount = (machineId: string): Effect.Effect<number, R
 		// If lastActiveAt is missing but entry exists, fall back to createdAt (not now)
 		// to avoid resetting the idle timer
 		const currentState = existingEntry?.state || "running";
-		const lastActiveAt =
-			currentState === "running"
-				? now
-				: existingEntry?.lastActiveAt ?? existingEntry?.createdAt ?? now;
+		const lastActiveAt = currentState === "running" ? now : (existingEntry?.lastActiveAt ?? existingEntry?.createdAt ?? now);
 
 		// Update pool entry with incremented failure count
 		yield* Effect.tryPromise({

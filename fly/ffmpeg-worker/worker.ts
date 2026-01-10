@@ -241,8 +241,7 @@ const uploadOutputs = (config: JobConfig, localOutputPaths: string[]) =>
 			const qualityName = getQualityName(config, i, localOutputPaths.length);
 			// When outputQualities is provided, qualityName is guaranteed to be VideoQuality
 			// When not provided, we use the first quality as fallback or cast (shouldn't happen in practice)
-			const quality: VideoQuality =
-				config.outputQualities?.[i] ?? (qualityName as VideoQuality);
+			const quality: VideoQuality = config.outputQualities?.[i] ?? (qualityName as VideoQuality);
 			const baseR2Key = extractR2Key(config.outputUrl);
 			const ext = localPath.match(/\.([^.]+)$/)?.[1] || "mp4";
 			const r2Key = config.outputQualities ? `${baseR2Key.replace(/\.[^/.]+$/, "")}-${quality}.${ext}` : baseR2Key;
@@ -335,9 +334,7 @@ const processJob = (jobId: string) =>
 			outputUrl: jobData.outputUrl || "",
 			preset: jobData.preset || "default",
 			webhookUrl: jobData.webhookUrl || "",
-			outputQualities: jobData.outputQualities
-				? (jobData.outputQualities.split(",") as VideoQuality[])
-				: undefined,
+			outputQualities: jobData.outputQualities ? (jobData.outputQualities.split(",") as VideoQuality[]) : undefined,
 		};
 
 		// Create scoped logger with jobId context

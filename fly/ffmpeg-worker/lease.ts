@@ -67,17 +67,12 @@ export const initializeWorker = (machineId: string): Effect.Effect<{ startedAt: 
 				if (data) {
 					// Upstash SDK may auto-parse JSON, so handle both string and object
 					const parsed = typeof data === "string" ? JSON.parse(data) : data;
-					const parsedLastActiveAt =
-						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedLastActiveAt = parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
 					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
 					return {
 						state: parsed.state || "running",
-						lastActiveAt:
-							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
-								? parsedLastActiveAt
-								: now,
-						createdAt:
-							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
+						lastActiveAt: parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt) ? parsedLastActiveAt : now,
+						createdAt: parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
 						failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 					};
 				}
@@ -141,16 +136,11 @@ export const updateMachineState = (
 					const parsed = typeof data === "string" ? JSON.parse(data) : data;
 					// Preserve actual values from Redis - only use now as fallback if truly missing or invalid
 					// Check for null/undefined first, then validate that Number() produces a valid number (not NaN)
-					const parsedLastActiveAt =
-						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedLastActiveAt = parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
 					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
 					// Validate that the numbers are actually valid (not NaN)
-					const lastActiveAt =
-						parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
-							? parsedLastActiveAt
-							: now;
-					const createdAt =
-						parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now;
+					const lastActiveAt = parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt) ? parsedLastActiveAt : now;
+					const createdAt = parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now;
 					return {
 						state: parsed.state || "running",
 						lastActiveAt,
@@ -174,10 +164,7 @@ export const updateMachineState = (
 		// so we can track how long the machine has been idle
 		// If lastActiveAt is missing but entry exists, fall back to createdAt (not now)
 		// to avoid resetting the idle timer
-		const lastActiveAt =
-			state === "running"
-				? now
-				: existingEntry?.lastActiveAt ?? existingEntry?.createdAt ?? now;
+		const lastActiveAt = state === "running" ? now : (existingEntry?.lastActiveAt ?? existingEntry?.createdAt ?? now);
 
 		yield* redisEffect(
 			(client) =>
@@ -216,17 +203,12 @@ export const cleanupWorker = (machineId: string): Effect.Effect<void, RedisError
 				if (data) {
 					// Upstash SDK may auto-parse JSON, so handle both string and object
 					const parsed = typeof data === "string" ? JSON.parse(data) : data;
-					const parsedLastActiveAt =
-						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedLastActiveAt = parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
 					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
 					return {
 						state: parsed.state || "stopped",
-						lastActiveAt:
-							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
-								? parsedLastActiveAt
-								: now,
-						createdAt:
-							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
+						lastActiveAt: parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt) ? parsedLastActiveAt : now,
+						createdAt: parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
 						failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 					};
 				}
@@ -472,17 +454,12 @@ const incrementWorkerFailureCount = (machineId: string): Effect.Effect<number, R
 				if (data) {
 					// Upstash SDK may auto-parse JSON, so handle both string and object
 					const parsed = typeof data === "string" ? JSON.parse(data) : data;
-					const parsedLastActiveAt =
-						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedLastActiveAt = parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
 					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
 					return {
 						state: parsed.state || "running",
-						lastActiveAt:
-							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
-								? parsedLastActiveAt
-								: now,
-						createdAt:
-							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
+						lastActiveAt: parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt) ? parsedLastActiveAt : now,
+						createdAt: parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
 						failureCount: Number(parsed.failureCount || 0),
 					};
 				}
@@ -540,17 +517,12 @@ const markWorkerFailed = (machineId: string, reason: string): Effect.Effect<void
 				if (data) {
 					// Upstash SDK may auto-parse JSON, so handle both string and object
 					const parsed = typeof data === "string" ? JSON.parse(data) : data;
-					const parsedLastActiveAt =
-						parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+					const parsedLastActiveAt = parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
 					const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
 					return {
 						state: parsed.state || "running",
-						lastActiveAt:
-							parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt)
-								? parsedLastActiveAt
-								: now,
-						createdAt:
-							parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
+						lastActiveAt: parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt) ? parsedLastActiveAt : now,
+						createdAt: parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
 						failureCount: Number(parsed.failureCount || 0),
 					};
 				}

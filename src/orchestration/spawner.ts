@@ -9,7 +9,7 @@ import { Effect, Schedule } from "effect";
 import { flyClient } from "../../fly/fly-client";
 import type { Components } from "../../fly/fly-machine-apis";
 import { LoggerService } from "../../packages/logger";
-import { type RedisError, RedisService, redisEffect } from "../redis/client";
+import { type RedisError, type RedisService, redisEffect } from "../redis/client";
 import { RWOS_CONFIG, RedisKeys } from "../redis/schema";
 import { acquireMachineSlot, releaseMachineSlot } from "./admission";
 import { addMachineToPool, popStoppedMachine, startMachine } from "./machine-pool";

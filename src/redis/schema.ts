@@ -210,9 +210,7 @@ export const deserializeJobData = (data: Record<string, string | null>): JobData
 		outputUrl: data.outputUrl || "",
 		preset: data.preset || "default",
 		webhookUrl: data.webhookUrl || "",
-		outputQualities: data.outputQualities
-			? (data.outputQualities.split(",") as VideoQuality[])
-			: undefined,
+		outputQualities: data.outputQualities ? (data.outputQualities.split(",") as VideoQuality[]) : undefined,
 		outputs: safeParseJson<JobOutput[]>(data.outputs as string | JobOutput[] | null),
 		filename: data.filename || undefined,
 		contentType: data.contentType || undefined,
@@ -238,10 +236,7 @@ export const serializeMachinePoolEntry = (entry: MachinePoolEntry): string => {
 	});
 };
 
-export const deserializeMachinePoolEntry = (
-	machineId: string,
-	data: string | Record<string, unknown> | null,
-): MachinePoolEntry | null => {
+export const deserializeMachinePoolEntry = (machineId: string, data: string | Record<string, unknown> | null): MachinePoolEntry | null => {
 	if (!data) {
 		return null;
 	}
@@ -266,16 +261,14 @@ export const deserializeMachinePoolEntry = (
 	}
 
 	// Safely parse numeric values, only falling back to Date.now() if truly missing/invalid
-	const parsedLastActiveAt =
-		parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
+	const parsedLastActiveAt = parsed.lastActiveAt != null ? Number(parsed.lastActiveAt) : null;
 	const parsedCreatedAt = parsed.createdAt != null ? Number(parsed.createdAt) : null;
 	const now = Date.now();
 
 	return {
 		machineId,
 		state: (parsed.state as MachinePoolEntry["state"]) || "running",
-		lastActiveAt:
-			parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt) ? parsedLastActiveAt : now,
+		lastActiveAt: parsedLastActiveAt != null && !Number.isNaN(parsedLastActiveAt) ? parsedLastActiveAt : now,
 		createdAt: parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt) ? parsedCreatedAt : now,
 		failureCount: parsed.failureCount !== undefined ? Number(parsed.failureCount) : undefined,
 	};
