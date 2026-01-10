@@ -14,7 +14,7 @@ Three-layer separation: control plane, state store, and compute plane. Each laye
 | State Store | Upstash Redis | Job queue, machine pool tracking, job status |
 | Compute Plane | Fly.io Machines | FFmpeg transcoding, R2 I/O operations |
 
-![Event-Driven Serverless Transcoding Pipeline](./design/architecture/Event-Driven%20Serverless%20Transcoding%20Pipeline.png)
+![Event-Driven Serverless Transcoding Pipeline](./design/architecture/Event-Driven%20Serverless%20Transcoding%20Pipeline%20-%20Simplified.png)
 
 ### System Design
 
