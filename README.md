@@ -1,4 +1,4 @@
-# TCoder
+# TCoder -  Event Driven Serverless Transcoding Pipeline
 
 Implementation of an event-driven, serverless video transcoding pipeline. Composes Cloudflare Workers for orchestration, R2 for object storage, Upstash Redis for state management, and Fly.io Machines for compute. Built with TypeScript, Hono, and Effect.
 
