@@ -91,7 +91,7 @@ tcoder/
 
 - [API Usage Guide](./USAGE.md) - CURL examples and API reference
 - [Local Development](./LOCAL_DEV.md) - Docker Compose setup
-- [Fly.io Workers](./fly/README.md) - Worker details, cost analysis, debugging
+- [Fly.io Workers](./fly/README.md) - Worker details, debugging
 - [TypeScript SDK](./packages/tcoder-client/README.md) - Client library
 
 ## Scripts

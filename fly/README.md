@@ -1,6 +1,6 @@
 # Fly.io FFmpeg Workers
 
-Pooled FFmpeg workers orchestrated via Redis. Machines are stopped when idle and reused when jobs arrive, minimizing costs.
+Pooled FFmpeg workers orchestrated via Redis. Machines are stopped when idle and reused when jobs arrive.
 
 For system architecture, see the [main README](../README.md).
 
@@ -105,25 +105,6 @@ bun run deploy
 | `R2_SECRET_ACCESS_KEY` | R2 secret key |
 | `R2_OUTPUT_BUCKET_NAME` | R2 output bucket name |
 
-## Cost Analysis
-
-Pooled RWOS reduces costs by reusing machines:
-
-| Metric | Ephemeral (1 job/machine) | Pooled RWOS |
-|--------|---------------------------|-------------|
-| Machine creates/day | 100 | ~10-20 (reused) |
-| Fly API calls/day | 100 | ~10-20 (mostly starts) |
-| Startup overhead | 100x | ~10-20x |
-| Effective cost | 100% | ~10-20% |
-
-Pricing (512MB shared CPU):
-- ~$0.0004/second (~$0.024/minute)
-- Stopped machines cost $0
-
-Budget targets:
-- $5/month: 200+ jobs
-- $10/month: 400+ jobs
-
 ## Monitoring
 
 ```bash
@@ -198,7 +179,7 @@ ffmpeg -i input.mp4 -c copy output.mp4
 - Never commit credentials to git
 - Use `fly secrets set` for env vars
 - Presigned URLs preferred over storing R2 credentials
-- Pool size limit (10) prevents runaway costs
+- Pool size limit (10) prevents resource exhaustion
 
 ## Scripts
 
