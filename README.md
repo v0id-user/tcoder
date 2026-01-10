@@ -126,3 +126,6 @@ bun run fly:deploy       # Deploy Fly.io image
 bun run fly:logs         # View Fly.io logs
 bun run test             # Run tests
 ```
+
+## Related Projects
+- **[TCoder Middleware](https://github.com/v0id-user/tcoder-middleware)**: Bunny.net edge middleware that protects `/premium/` paths by verifying JWT tokens.
