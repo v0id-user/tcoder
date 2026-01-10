@@ -11,6 +11,7 @@
 import { Redis } from "@upstash/redis/cloudflare";
 import { Effect } from "effect";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { makeLoggerLayer, makeEffectLoggerLayer, LoggerService } from "../packages/logger";
 import { createRoutes, createWebhookRoutes } from "./api/routes";
 import { stopMachine } from "./orchestration/machine-pool";
@@ -22,6 +23,13 @@ import { RWOS_CONFIG, RedisKeys, deserializeJobData, deserializeMachinePoolEntry
 // Chain routes directly for proper RPC type inference
 // See: https://hono.dev/docs/guides/best-practices#if-you-want-to-use-rpc-features
 const routes = new Hono()
+	.use("*", cors({
+		origin: "*",
+		allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+		allowHeaders: ["Content-Type", "Authorization"],
+		exposeHeaders: ["Content-Type"],
+		credentials: false,
+	}))
 	.get("/", (c) => c.json({ status: "ok", service: "tcoder" }))
 	.route("/api", createRoutes())
 	.route("/", createWebhookRoutes());
